@@ -1,0 +1,14 @@
+mysql-connector-python==8.2.0
+python-dotenv
+boto3
+pydantic
+alembic
+SQLAlchemy
+paramiko  
+sshtunnel
+yfinance
+pandas
+etf-scraper
+norgatedata
+cachetools
+tqdm
