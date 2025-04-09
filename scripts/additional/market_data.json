@@ -1,0 +1,54 @@
+{
+  "timestamp": "2025-02-05T08:38:01.456561+00:00",
+  "data": {
+    "S&P500": {
+      "ticker": "SPX",
+      "price": 6037.88,
+      "change_percent": 0.72,
+      "currency": "USD",
+      "valid": 1
+    },
+    "NASDAQ": {
+      "ticker": "IXIC",
+      "price": 19654.02,
+      "change_percent": 1.35,
+      "currency": "USD",
+      "valid": 1
+    },
+    "BTC": {
+      "ticker": "BTC-USD",
+      "price": 97823,
+      "change_percent": -0.29101,
+      "currency": "USD",
+      "valid": 1
+    },
+    "GOLD": {
+      "ticker": "XAUUSD",
+      "price": 2891.8,
+      "change_percent": 0.56,
+      "currency": "USD",
+      "valid": 1
+    },
+    "EUR/USD": {
+      "ticker": "EURUSD",
+      "price": 1.0393,
+      "change_percent": 0.1,
+      "currency": "USD",
+      "valid": 1
+    },
+    "VIX": {
+      "ticker": "VIX",
+      "price": 17.48,
+      "change_percent": 1.57,
+      "currency": "USD",
+      "valid": 1
+    },
+    "CRYPTO_TMC": {
+      "ticker": "TOTAL",
+      "price": 3337681354968.3965,
+      "change_percent": -1.1379265952180746,
+      "currency": "USD",
+      "valid": 1
+    }
+  }
+}
