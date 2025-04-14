@@ -30,7 +30,7 @@ from scripts.common_function import (
 NUM_WORKERS = 6
 MIN_DELAY = 0.2
 MAX_DELAY = 1.0
-DEFAULT_START_DATE = "2020-01-01"  
+DEFAULT_START_DATE = "2025-01-01" 
 DEFAULT_SOURCE = "yahoo"  
 
 # Configure logging

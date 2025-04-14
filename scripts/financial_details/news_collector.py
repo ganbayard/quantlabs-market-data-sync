@@ -24,12 +24,12 @@ from sqlalchemy import func, inspect
 
 # Constants and Configuration
 NUM_WORKERS = 6
-MIN_DELAY = 2.0
-MAX_DELAY = 5.0
+MIN_DELAY = 1.0
+MAX_DELAY = 2.0
 MAX_RETRIES = 1
-DEFAULT_DAYS = 30
+DEFAULT_DAYS = 60
 MIN_ARTICLES = 10
-MAX_ARTICLES = 15
+MAX_ARTICLES = 20
 
 # File paths
 BASE_DIR = Path(__file__).parent

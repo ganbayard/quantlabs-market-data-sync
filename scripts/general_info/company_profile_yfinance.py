@@ -22,7 +22,7 @@ from models.market_data import Company, Executive
 from scripts.common_function import get_database_engine, add_environment_args, get_session_maker
 
 # Constants and Configuration
-NUM_WORKERS = 6
+NUM_WORKERS = 2
 BATCH_SIZE = 100
 MIN_DELAY = 2.0
 MAX_DELAY = 4.0
