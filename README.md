@@ -1,6 +1,7 @@
-# Financial Market Data Sync
+# Quantlab Market Data Sync
 
 This project provides utilities for managing MySQL database connections and operations across different environments (local development and AWS cloud production).
+
 
 ## aws connection 
 
@@ -15,25 +16,60 @@ chmod 600 .../quantlab-web.pem
 
 ssh -o "ServerAliveInterval 60" -i "aws-key/quantlab-web.pem" ubuntu@ec2-3-72-81-201.eu-central-1.compute.amazonaws.com
 
+## Quick Daily Run
+```sh
+# Clone the repository
+git clone https://github.com/your-organization/quantlabs-market-data-sync.git
+cd quantlabs-market-data-sync
+
+# Set up environment
+cp .env.example .env
+# Edit .env file with  credentials
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+
 ## Project Structure
 ```
-financial-market-data-sync/
-├── config/
-│   ├── __init__.py
-│   ├── local_config.py
-│   └── production_config.py
-├── database/
-│   ├── __init__.py
-│   └── connection.py
-├── scripts/
-│   ├── __init__.py
-│   └── db_operations.py
-├── init/
-│   └── 01_create_tables.sql
-├── docker-compose.yml
-├── .env.example
-├── requirements.txt
-└── README.md
+quantlabs-market-data-sync/
+├── alembic/                # Database migration files
+│   ├── versions/           # Migration version scripts
+│   ├── env.py              # Alembic environment configuration
+├── database/               # Database connection utilities
+│   ├── connection.py       # Database connection management
+│   ├── test_mysql_tunnel.py # SSH tunnel for remote database access
+├── docker-entrypoint-initdb.d/ # Docker MySQL initialization
+├── logs/                   # Log output directory
+├── models/                 # SQLAlchemy database models
+│   ├── market_data.py      # Financial data models (YfBar1d, EquityTechnicalIndicator, etc.)
+├── scripts/                # Data collection and processing scripts
+│   ├── common_function.py  # Shared utilities for all scripts
+│   ├── equity2user/        # Stock classification and recommendation scripts
+│   │   ├── equity_technical_indicators.py  # Technical indicator calculations
+│   │   ├── equity2user_history.py          # Stock classification and user recommendations
+│   ├── etf/                # ETF data collection scripts
+│   │   ├── holdings_ishare_etf_list.py     # iShares ETF list retrieval
+│   │   ├── holdings_ishare_etf_update.py   # ETF holdings updates
+│   ├── financial_details/  # Financial statement and news scripts
+│   │   ├── company_financials_yfinance.py  # Income, balance sheet and cash flow data
+│   │   ├── news_collector.py               # Financial news collection
+│   ├── general_info/       # Basic market data scripts
+│   │   ├── company_profile_yfinance.py     # Company profile information
+│   │   ├── symbol_fields_update.py         # Basic symbol data updates
+│   │   ├── yf_daily_bar_loader.py          # Price history collection
+│   ├── sector_rotation/    # Sector analysis scripts
+│   ├── symbols/            # Symbol lists for processing
+│   │   ├── stock_symbols.txt               # Main list of stock symbols
+├── run_migrations.py       # Database migration script
+├── run_scripts_sequence.sh # Sequential script execution
+├── docker-compose.yml      # Docker configuration for local development
+├── .env.example            # Environment variable template
+├── requirements.txt        # Python dependencies
+└── README.md               # Project documentation
 ```
 
 ## Local Development Setup
