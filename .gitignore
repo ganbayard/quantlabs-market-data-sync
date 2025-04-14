@@ -1,6 +1,8 @@
 # Custom ignore
 venv/
 aws-key/
+execution.csv
+execution_log\scripts_run_log.txt
 
 
 # Byte-compiled / optimized / DLL files
