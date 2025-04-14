@@ -13,6 +13,7 @@ from pathlib import Path
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from cachetools import TTLCache
+import concurrent.futures
 
 # Cache for data to avoid redundant API calls
 data_cache = {}
@@ -21,93 +22,199 @@ cache_lock = threading.Lock()
 class YahooFinanceLoader:
     """Yahoo Finance data loader implementation for price data"""
     
-    def __init__(self):
+    def __init__(self, batch_size=5, worker_count=2):
+        """
+        Yahoo Finance data loader with robust download handling
+        
+        Args:
+            batch_size: Number of symbols to process in a batch (default: 5)
+            worker_count: Number of concurrent download workers (default: 2)
+        """
+        self.batch_size = batch_size
+        self.worker_count = worker_count
         self.logger = logging.getLogger(__name__)
     
     def load_symbol_data(self, symbol, start_date, end_date):
         """
-        Load price data for a specific symbol within date range
+        Load historical data for a single symbol
         
         Args:
-            symbol (str): Stock symbol
-            start_date (datetime): Start date
-            end_date (datetime): End date
+            symbol: Stock symbol to download
+            start_date: Start date for historical data
+            end_date: End date for historical data
             
         Returns:
-            DataFrame: DataFrame with OHLCV data or None on failure
+            DataFrame with historical data or None if download failed
         """
-        # Generate cache key
-        cache_key = f"{symbol}_{start_date}_{end_date}_yahoo"
-        
-        # Check cache
-        with cache_lock:
-            if cache_key in data_cache:
-                return data_cache[cache_key]
-                
-        try:
-            # Fetch data from Yahoo Finance
-            ticker = yf.Ticker(symbol)
-            df = ticker.history(start=start_date, end=end_date, auto_adjust=True)
-            
-            # Normalize column names
-            if not df.empty:
-                df.columns = [col.title() for col in df.columns]  # Capitalize first letter
-                required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-                
-                # Check if required columns exist
-                if all(col in df.columns for col in required_columns):
-                    # Only keep essential columns
-                    df = df[required_columns]
-                    
-                    # Store in cache
-                    with cache_lock:
-                        data_cache[cache_key] = df
-                    
-                    return df
-            
-            self.logger.warning(f"No data found for {symbol} in Yahoo Finance")
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error loading data for {symbol} from Yahoo Finance: {e}")
-            return None
+        return self._download_with_retry(symbol, start_date, end_date)
     
-    def load_multiple_symbols(self, symbols, start_date, end_date, max_workers=4):
+    def _download_with_retry(self, symbol, start_date, end_date, max_retries=5, initial_delay=2):
+        """Download stock data with exponential backoff retry logic"""
+        delay = initial_delay
+        attempt = 0
+        rate_limited = False
+        
+        while attempt < max_retries:
+            attempt += 1
+            try:
+                # If we've been rate limited before, wait longer
+                if rate_limited:
+                    self.logger.info(f"Waiting {delay:.2f}s before retry {attempt} for {symbol}...")
+                    time.sleep(delay)
+                    rate_limited = False
+                
+                self.logger.info(f"Downloading {symbol} (attempt {attempt})...")
+                ticker = yf.Ticker(symbol)
+                
+                # Check if ticker exists
+                check_df = ticker.history(period='1d')
+                if check_df.empty:
+                    self.logger.info(f"{symbol} has no data available")
+                    return None
+                
+                # Get historical data with explicit date range
+                history_df = ticker.history(start=start_date, end=end_date, auto_adjust=True)
+                
+                if history_df.empty:
+                    self.logger.info(f"{symbol} returned empty dataframe")
+                    return None
+                
+                # Check for splits and dividends
+                try:
+                    # Get splits and dividends directly from ticker
+                    splits = ticker.splits
+                    dividends = ticker.dividends
+                    
+                    has_recent_event = False
+                    
+                    # Handle timezone-aware DatetimeIndex properly
+                    if len(splits) > 0 and isinstance(splits.index, pd.DatetimeIndex):
+                        # Convert dates to UTC for safe comparison
+                        start_ts = pd.Timestamp(start_date).tz_localize('UTC')
+                        end_ts = pd.Timestamp(end_date).tz_localize('UTC')
+                        
+                        # Convert splits index to UTC if it has timezone
+                        splits_idx = splits.index
+                        if splits_idx.tz is not None:
+                            # For timezone-aware index, convert the comparison timestamps to match
+                            start_ts = start_ts.tz_convert(splits_idx.tz)
+                            end_ts = end_ts.tz_convert(splits_idx.tz)
+                        
+                        # Now do the comparison with appropriate timezone handling
+                        recent_splits = splits[(splits_idx >= start_ts) & (splits_idx <= end_ts)]
+                        if not recent_splits.empty:
+                            has_recent_event = True
+                            self.logger.info(f"{symbol} has recent splits")
+                    
+                    # Same for dividends with timezone handling
+                    if len(dividends) > 0 and isinstance(dividends.index, pd.DatetimeIndex):
+                        # Convert dates to UTC for safe comparison
+                        start_ts = pd.Timestamp(start_date).tz_localize('UTC')
+                        end_ts = pd.Timestamp(end_date).tz_localize('UTC')
+                        
+                        # Convert dividends index to UTC if it has timezone
+                        div_idx = dividends.index
+                        if div_idx.tz is not None:
+                            # For timezone-aware index, convert the comparison timestamps to match
+                            start_ts = start_ts.tz_convert(div_idx.tz)
+                            end_ts = end_ts.tz_convert(div_idx.tz)
+                        
+                        # Now do the comparison with appropriate timezone handling
+                        recent_dividends = dividends[(div_idx >= start_ts) & (div_idx <= end_ts)]
+                        if not recent_dividends.empty:
+                            has_recent_event = True
+                            self.logger.info(f"{symbol} has recent dividends")
+                    
+                    # If split or dividend occurred, fetch full history
+                    if has_recent_event:
+                        self.logger.info(f"Split or dividend happened to {symbol} so fetching all history again...")
+                        # Always use explicit date range
+                        all_history_df = ticker.history(start="2000-01-01", end=end_date, auto_adjust=True)
+                        if not all_history_df.empty:
+                            history_df = all_history_df
+                except Exception as e:
+                    self.logger.warning(f"{symbol}: Error checking splits/dividends: {e}")
+                
+                # Add jitter to avoid synchronized requests hitting rate limits
+                time.sleep(random.uniform(0.2, 0.5))
+                return history_df
+                
+            except Exception as e:
+                error_msg = str(e).lower()
+                
+                # Special handling for the 'period max is invalid' error
+                if "period 'max' is invalid" in error_msg:
+                    self.logger.warning(f"{symbol}: {e} - Using explicit date range instead")
+                    # Try again with explicit date range instead of 'max'
+                    try:
+                        ticker = yf.Ticker(symbol)
+                        history_df = ticker.history(start=datetime(2000, 1, 1), end=end_date, auto_adjust=True)
+                        return history_df
+                    except Exception as retry_error:
+                        self.logger.error(f"{symbol}: Error on retry with explicit dates: {retry_error}")
+                
+                # Handle rate limiting specifically
+                elif "rate limit" in error_msg or "too many requests" in error_msg:
+                    rate_limited = True
+                    self.logger.warning(f"Rate limit hit for {symbol}. Will retry with backoff.")
+                    
+                    # Exponential backoff with jitter
+                    delay = initial_delay * (2 ** (attempt - 1)) + random.uniform(0, 1)
+                    
+                    # Cap the delay at a reasonable maximum (30 seconds)
+                    delay = min(delay, 30)
+                else:
+                    self.logger.error(f"Error downloading {symbol}: {e}")
+                    # For non-rate-limit errors, use a shorter delay
+                    time.sleep(1)
+        
+        self.logger.error(f"Failed to download {symbol} after {max_retries} attempts")
+        return None
+        
+    def load_multiple_symbols(self, symbols, start_date, end_date):
         """
-        Load price data for multiple symbols with threading
+        Load data for multiple symbols with concurrency
         
         Args:
-            symbols (list): List of stock symbols
-            start_date (datetime): Start date
-            end_date (datetime): End date
-            max_workers (int): Maximum number of concurrent workers
+            symbols: List of stock symbols to download
+            start_date: Start date for historical data
+            end_date: End date for historical data
             
         Returns:
-            dict: Dictionary mapping symbols to their price DataFrames
+            Dictionary mapping symbols to their dataframes
         """
         results = {}
         
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Create futures for each symbol
-            future_to_symbol = {
-                executor.submit(self.load_symbol_data, symbol, start_date, end_date): symbol 
-                for symbol in symbols
-            }
+        # Process in small batches to avoid rate limits
+        for i in range(0, len(symbols), self.batch_size):
+            batch = symbols[i:i+self.batch_size]
+            batch_num = i//self.batch_size + 1
+            total_batches = (len(symbols) + self.batch_size - 1)//self.batch_size
             
-            # Process results as they complete
-            for future in as_completed(future_to_symbol):
-                symbol = future_to_symbol[future]
-                try:
-                    df = future.result()
-                    if df is not None and not df.empty:
-                        results[symbol] = df
+            self.logger.info(f"Processing batch {batch_num}/{total_batches} - Symbols: {', '.join(batch)}")
+            
+            # Process each symbol in the batch with concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.worker_count) as executor:
+                future_to_symbol = {
+                    executor.submit(self._download_with_retry, symbol, start_date, end_date): symbol 
+                    for symbol in batch
+                }
+                
+                for future in concurrent.futures.as_completed(future_to_symbol):
+                    symbol = future_to_symbol[future]
                     
-                    # Add small delay to avoid rate limiting
-                    time.sleep(random.uniform(0.1, 0.3))
-                    
-                except Exception as e:
-                    self.logger.error(f"Error processing {symbol}: {e}")
-        
+                    try:
+                        result = future.result()
+                        results[symbol] = result
+                    except Exception as e:
+                        self.logger.error(f"Exception processing {symbol}: {e}")
+            
+            # Add delay between batches to prevent rate limiting
+            if i + self.batch_size < len(symbols):
+                wait_time = random.uniform(3, 5)
+                self.logger.info(f"Waiting {wait_time:.2f}s before next batch...")
+                time.sleep(wait_time)
+                
         return results
 
 
