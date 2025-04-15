@@ -100,4 +100,58 @@ for ((i=0; i<${#scripts[@]}; i++)); do
 done
 
 echo "===================================================================" | tee -a "$LOG_FILE"
-echo "Script sequence completed at $(date "+%Y-%m-%d %H:%M:%S")" | tee -a "$LOG_FILE"
+echo "Script sequence completed at $(date "+%Y-%m-%d %H:%M:%S")" | tee -a "$LOG_FILE"# Add this function to format seconds to HH:MM:SS
+format_duration() {
+    local seconds=$1
+    printf "%02d:%02d:%02d" $((seconds/3600)) $(( (seconds/60) % 60)) $((seconds % 60))
+}
+
+# Function to execute script and log results
+run_script() {
+    local script_cmd="$1"
+    local script_name=$(echo "$script_cmd" | cut -d' ' -f1)
+    
+    # Log start time
+    start_time=$(date +%s)
+    start_time_str=$(date "+%Y-%m-%d %H:%M:%S")
+    
+    echo "[$start_time_str] Starting: $script_cmd --env $ENV" | tee -a "$LOG_FILE"
+    
+    # Execute the script
+    $script_cmd --env $ENV
+    exit_code=$?
+    
+    # Log end time and calculate duration
+    end_time=$(date +%s)
+    end_time_str=$(date "+%Y-%m-%d %H:%M:%S")
+    duration=$((end_time - start_time))
+    duration_formatted=$(format_duration $duration)
+    
+    echo "[$end_time_str] Finished: $script_cmd (Status: $exit_code, Duration: ${duration_formatted})" | tee -a "$LOG_FILE"
+    
+    # Prepare Telegram notification message
+    if [ $exit_code -eq 0 ]; then
+        status="✅ SUCCESS"
+    else
+        status="❌ FAILED"
+    fi
+    
+    message="*Script Execution Report*
+------------------
+📋 *Script*: \`$script_name\`
+🖥️ *Environment*: $ENV
+🕒 *Started*: $start_time_str
+🕒 *Finished*: $end_time_str
+⏱️ *Duration*: ${duration_formatted}
+🚦 *Status*: $status (exit code: $exit_code)
+------------------"
+    
+    # Send to Telegram
+    curl -s -X POST "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
+         -d chat_id="$CHAT_ID" \
+         -d text="$message" \
+         -d parse_mode="Markdown"
+    
+    # Return exit code to check if we should continue
+    return $exit_code
+}
