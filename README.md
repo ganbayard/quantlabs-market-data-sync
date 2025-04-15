@@ -16,20 +16,33 @@ chmod 600 .../quantlab-web.pem
 
 ssh -o "ServerAliveInterval 60" -i "aws-key/quantlab-web.pem" ubuntu@ec2-3-72-81-201.eu-central-1.compute.amazonaws.com
 
-## Quick Daily Run
+## Quick Installation and Run
 ```sh
 # Clone the repository
-git clone https://github.com/your-organization/quantlabs-market-data-sync.git
+git clone https://github.com/ganbayard/quantlabs-market-data-sync
 cd quantlabs-market-data-sync
 
 # Set up environment
 cp .env.example .env
-# Edit .env file with  credentials
+# Edit .env file with prod credentials
 
 # Create virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+
+# Update Database Model Migrations for Table Columns and Data Types
+python run_migration.py
+
+# Run all Scripts as sequential
+
+## On AWS Instance for Production Mysql
+sh run_scripts_sequence.sh prod
+
+## Local mysql test
+sh run_scripts_sequence.sh
+
+
 ```
 
 
@@ -74,7 +87,7 @@ quantlabs-market-data-sync/
 
 ## Local Development Setup
 
-### Option 1: Using Docker (Recommended)
+### Mysql Database Docker Deployment
 
 1. Start the MySQL database:
 ```bash
@@ -100,44 +113,11 @@ cp .env.example .env
 
 The `.env` file is already configured for the Docker setup.
 
-### Option 2: Manual MySQL Setup
-
-1. Create a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Copy `.env.example` to `.env` and update with your MySQL credentials:
-```bash
-cp .env.example .env
-```
-
-
-## Running Database Operations
-
-To run database operations:
-
-```bash
-# For local development
-python scripts/db_operations.py --env local
-
-# For AWS production
-python scripts/db_operations.py --env production
-```
-
 ## Docker Commands
 
 - Start the database: `docker-compose up -d`
 - Stop the database: `docker-compose down`
 - View logs: `docker-compose logs -f`
-- Restart the database: `docker-compose restart`
-- Remove all data: `docker-compose down -v`
 
 ## Database Migrations
 
@@ -202,15 +182,3 @@ The script uses different database connections based on the `--env` parameter:
 - **dev**: Uses local Docker database specified by `LOCAL_DB_*` variables in `.env`
 - **prod**: Uses production database specified by `DB_*` variables in `.env`
 
-### Safety Considerations
-
-- Always run migrations against development first before applying to production
-- Consider backing up your production database before running migrations
-- Review generated migration files before applying them to production
-
-## Security
-
-- Never commit `.env` files or sensitive credentials
-- Use appropriate IAM roles and security groups in AWS
-- Follow the principle of least privilege for database access
-- Change default passwords in production
