@@ -10,15 +10,15 @@ class Base(DeclarativeBase):
 
 class YfBar1d(Base):
     __tablename__ = 'yf_daily_bar'
-    id        = sa.Column(sa.Integer, primary_key=True)
-    symbol    = sa.Column(sa.String(20))  
+    id        = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol    = sa.Column(sa.String(255))  
     timestamp = sa.Column(sa.DateTime)
-    open      = sa.Column(sa.Float)
-    high      = sa.Column(sa.Float)
-    low       = sa.Column(sa.Float)
-    close     = sa.Column(sa.Float)
-    volume    = sa.Column(sa.Float)
-    __table_args__ = (sa.UniqueConstraint('symbol', 'timestamp'),)
+    open      = sa.Column(sa.Numeric(10, 4))
+    high      = sa.Column(sa.Numeric(10, 4))
+    low       = sa.Column(sa.Numeric(10, 4))
+    close     = sa.Column(sa.Numeric(10, 4))
+    volume    = sa.Column(sa.BigInteger)
+    __table_args__ = (sa.UniqueConstraint('symbol', 'timestamp', name='yf_daily_bar_symbol_timestamp_unique'),)
     def __repr__(self):
         return f"YfBar1d(symbol='{self.symbol}', timestamp={self.timestamp})"
     def get_tuple(self):
@@ -38,12 +38,12 @@ class SymbolFields(Base):
     __tablename__ = 'symbol_fields'
 
     id           = sa.Column(sa.Integer, primary_key=True)
-    symbol       = sa.Column(sa.String(20), unique=True, nullable=False)  
+    symbol       = sa.Column(sa.String(255), unique=True, nullable=False)  
     company_name = sa.Column(sa.String(255))  
-    price        = sa.Column(sa.Float)
-    change       = sa.Column(sa.Float)
-    volume       = sa.Column(sa.Float)
-    market_cap   = sa.Column(sa.Float)
+    price        = sa.Column(sa.Numeric(10, 4))
+    change       = sa.Column(sa.Numeric(10, 4))
+    volume       = sa.Column(sa.BigInteger)
+    market_cap   = sa.Column(sa.Numeric(20, 2))
     market       = sa.Column(sa.String(100))  
     sector       = sa.Column(sa.String(100))  
     industry     = sa.Column(sa.String(100))  
@@ -61,15 +61,15 @@ class SymbolFields(Base):
 ############################################################################################ Sector rotation data
 
 class MmtvDailyBar(Base):
-    __tablename__ = 'mmtv_daily_bar'
+    __tablename__ = 'mmtv_daily_bars'
 
-    date       = sa.Column(sa.Date, primary_key=True)
-    field_name = sa.Column(sa.String(100), primary_key=True)  
-    field_type = sa.Column(sa.String(100), primary_key=True)  
-    open       = sa.Column(sa.Float)
-    high       = sa.Column(sa.Float)
-    low        = sa.Column(sa.Float)
-    close      = sa.Column(sa.Float)
+    date       = sa.Column(sa.DateTime, primary_key=True)
+    field_name = sa.Column(sa.String(255), primary_key=True)  
+    field_type = sa.Column(sa.String(255), primary_key=True)  
+    open       = sa.Column(sa.Numeric(8, 2))
+    high       = sa.Column(sa.Numeric(8, 2))
+    low        = sa.Column(sa.Numeric(8, 2))
+    close      = sa.Column(sa.Numeric(8, 2))
 
     def __repr__(self):
         return f"MmtvDailyBar(date='{self.date}', field_name='{self.field_name}', field_type='{self.field_type}', open={self.open}, high={self.high}, low={self.low}, close={self.close})"
@@ -80,23 +80,25 @@ class MmtvDailyBar(Base):
 class IShareETF(Base):
     __tablename__ = 'ishare_etf'
     
-    id              = sa.Column(sa.Integer, primary_key=True)
+    id              = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
     fund_name       = sa.Column(sa.String(255), nullable=False)
     inception_date  = sa.Column(sa.Date)
-    ticker          = sa.Column(sa.String(20), nullable=False, unique=True)
-    cusip           = sa.Column(sa.String(9))
-    isin            = sa.Column(sa.String(12))
-    asset_class     = sa.Column(sa.String(50))
-    subasset_class  = sa.Column(sa.String(50))
-    country         = sa.Column(sa.String(50))
-    region          = sa.Column(sa.String(50))
+    ticker          = sa.Column(sa.String(255), nullable=False, unique=True)
+    cusip           = sa.Column(sa.String(255))
+    isin            = sa.Column(sa.String(255))
+    asset_class     = sa.Column(sa.String(255))
+    subasset_class  = sa.Column(sa.String(255))
+    country         = sa.Column(sa.String(255))
+    region          = sa.Column(sa.String(255))
     product_url     = sa.Column(sa.String(255))
-    product_id      = sa.Column(sa.String(50))
-    net_assets      = sa.Column(sa.Float)
-    fund_type       = sa.Column(sa.String(10))
-    provider        = sa.Column(sa.String(50))
-    exchange        = sa.Column(sa.String(50))
+    product_id      = sa.Column(sa.String(255))
+    net_assets      = sa.Column(sa.Numeric(20, 2))
+    fund_type       = sa.Column(sa.String(255))
+    provider        = sa.Column(sa.String(255))
+    exchange        = sa.Column(sa.String(255))
     benchmark       = sa.Column(sa.String(255))
+    created_at      = sa.Column(sa.DateTime)
+    updated_at      = sa.Column(sa.DateTime)
 
     def __repr__(self):
         return f"IShareETF(ticker='{self.ticker}', fund_name='{self.fund_name}')"
@@ -104,154 +106,141 @@ class IShareETF(Base):
 
 class IShareETFHolding(Base):
     __tablename__ = 'ishare_etf_holding'
-    id               = sa.Column(sa.Integer, primary_key=True)
-    ishare_etf_id    = sa.Column(sa.Integer, sa.ForeignKey('ishare_etf.id'), nullable=False)
-    ticker           = sa.Column(sa.String(20))
-    name             = sa.Column(sa.String(255))
-    sector           = sa.Column(sa.String(100))
-    asset_class      = sa.Column(sa.String(100))
-    market_value     = sa.Column(sa.Float)
-    weight           = sa.Column(sa.Float)
-    notional_value   = sa.Column(sa.Float)
-    amount           = sa.Column(sa.Float)
-    price            = sa.Column(sa.Float)
-    location         = sa.Column(sa.String(100))
-    exchange         = sa.Column(sa.String(100))
-    currency         = sa.Column(sa.String(3))
-    fx_rate          = sa.Column(sa.Float)
-    market_currency  = sa.Column(sa.String(3))
+    id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    ishare_etf_id    = sa.Column(sa.BigInteger, sa.ForeignKey('ishare_etf.id'), nullable=False)
+    ticker           = sa.Column(sa.String(255))
+    name             = sa.Column(sa.String(255), nullable=False)
+    sector           = sa.Column(sa.String(255))
+    asset_class      = sa.Column(sa.String(255), nullable=False)
+    market_value     = sa.Column(sa.Numeric(20, 2), nullable=False)
+    weight           = sa.Column(sa.Numeric(10, 4), nullable=False)
+    notional_value   = sa.Column(sa.Numeric(20, 2), nullable=False)
+    amount           = sa.Column(sa.Numeric(20, 2), nullable=False)
+    price            = sa.Column(sa.Numeric(20, 2), nullable=False)
+    location         = sa.Column(sa.String(255))
+    exchange         = sa.Column(sa.String(255))
+    currency         = sa.Column(sa.String(255))
+    fx_rate          = sa.Column(sa.Numeric(10, 4), nullable=False)
+    market_currency  = sa.Column(sa.String(255))
     accrual_date     = sa.Column(sa.Date)
-    fund_ticker      = sa.Column(sa.String(10))
-    as_of_date       = sa.Column(sa.Date)
+    fund_ticker      = sa.Column(sa.String(255), nullable=False)
+    as_of_date       = sa.Column(sa.Date, nullable=False)
+    created_at       = sa.Column(sa.DateTime)
+    updated_at       = sa.Column(sa.DateTime)
     ishare_etf       = relationship('IShareETF', back_populates='holdings')
     
     def __repr__(self) -> str:
         return f"IShareETFHolding(ticker='{self.ticker}', ishare_etf_id={self.ishare_etf_id})"
 
-IShareETF.holdings = relationship('IShareETFHolding', order_by=IShareETFHolding.id , back_populates='ishare_etf')
+IShareETF.holdings = relationship('IShareETFHolding', order_by=IShareETFHolding.id, back_populates='ishare_etf')
 
 
 ############################################################################################ Financial details data
 ## income_statement, balance_sheet, cash_flow, news_articles
 
 class IncomeStatement(Base):
-    __tablename__ = 'income_statement'
-    id                      = sa.Column(sa.Integer, primary_key=True)
-    symbol                  = sa.Column(sa.String(10), index=True, nullable=False)
-    date                    = sa.Column(sa.Date, nullable=False)
-    period_type             = sa.Column(sa.String(10))  # 'Annual' or 'Quarterly'
+    __tablename__ = 'income_statements'
+    id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol                  = sa.Column(sa.String(255), index=True, nullable=False)
+    date                    = sa.Column(sa.DateTime, nullable=False)
+    period_type             = sa.Column(sa.String(10), nullable=False)
     
     # Revenue and profitability
-    revenue                 = sa.Column(sa.Float)
-    total_revenue           = sa.Column(sa.Float)
-    cost_of_revenue         = sa.Column(sa.Float)
-    gross_profit            = sa.Column(sa.Float)
+    total_revenue           = sa.Column(sa.Numeric(precision=None))
+    cost_of_revenue         = sa.Column(sa.Numeric(precision=None))
+    gross_profit            = sa.Column(sa.Numeric(precision=None))
     
     # Operating metrics
-    operating_expense       = sa.Column(sa.Float)
-    operating_income        = sa.Column(sa.Float)
-    total_operating_income  = sa.Column(sa.Float)
-    total_expenses          = sa.Column(sa.Float)
+    operating_expense       = sa.Column(sa.Numeric(precision=None))
+    operating_income        = sa.Column(sa.Numeric(precision=None))
+    total_operating_income  = sa.Column(sa.Numeric(precision=None))
+    total_expenses          = sa.Column(sa.Numeric(precision=None))
     
     # Non-operating items
-    net_non_operating_interest = sa.Column(sa.Float)
-    other_income_expense    = sa.Column(sa.Float)
-    pretax_income           = sa.Column(sa.Float)
-    tax_provision           = sa.Column(sa.Float)
+    net_non_operating_interest = sa.Column(sa.Numeric(precision=None))
+    other_income_expense    = sa.Column(sa.Numeric(precision=None))
+    pretax_income           = sa.Column(sa.Numeric(precision=None))
+    tax_provision           = sa.Column(sa.Numeric(precision=None))
     
     # Net income and EPS
-    net_income              = sa.Column(sa.Float)
-    normalized_income       = sa.Column(sa.Float)
-    basic_shares            = sa.Column(sa.Float)
-    diluted_shares          = sa.Column(sa.Float)
-    basic_eps               = sa.Column(sa.Float)
-    diluted_eps             = sa.Column(sa.Float)
-    eps                     = sa.Column(sa.Float)
+    net_income              = sa.Column(sa.Numeric(precision=None))
+    normalized_income       = sa.Column(sa.Numeric(precision=None))
+    basic_shares            = sa.Column(sa.Numeric(precision=None))
+    diluted_shares          = sa.Column(sa.Numeric(precision=None))
+    basic_eps               = sa.Column(sa.Numeric(precision=None))
+    diluted_eps             = sa.Column(sa.Numeric(precision=None))
     
     # Additional metrics
-    ebit                    = sa.Column(sa.Float)
-    ebitda                  = sa.Column(sa.Float)
-    interest_income         = sa.Column(sa.Float)
-    interest_expense        = sa.Column(sa.Float)
-    net_interest_income     = sa.Column(sa.Float)
+    ebit                    = sa.Column(sa.Numeric(precision=None))
+    ebitda                  = sa.Column(sa.Numeric(precision=None))
+    interest_income         = sa.Column(sa.Numeric(precision=None))
+    interest_expense        = sa.Column(sa.Numeric(precision=None))
+    net_interest_income     = sa.Column(sa.Numeric(precision=None))
     
     # Timestamps
-    created_at              = sa.Column(sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now())
-    
-    __table_args__ = (
-        sa.UniqueConstraint("symbol", "date", "period_type", name="uix_income_1"),
-    )
+    last_updated            = sa.Column(sa.DateTime, onupdate=sa.func.now())
     
     def __repr__(self):
         return f"IncomeStatement(symbol='{self.symbol}', date={self.date})"
 
 
 class BalanceSheet(Base):
-    __tablename__ = 'balance_sheet'
-    id                      = sa.Column(sa.Integer, primary_key=True)
-    symbol                  = sa.Column(sa.String(10), index=True, nullable=False)
-    date                    = sa.Column(sa.Date, nullable=False)
-    period_type             = sa.Column(sa.String(10))
+    __tablename__ = 'balance_sheets'
+    id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol                  = sa.Column(sa.String(255), index=True, nullable=False)
+    date                    = sa.Column(sa.DateTime, nullable=False)
+    period_type             = sa.Column(sa.String(10), nullable=False)
     
     # Main categories
-    total_assets            = sa.Column(sa.Float)
-    total_liabilities       = sa.Column(sa.Float)
-    total_equity            = sa.Column(sa.Float)
-    equity                  = sa.Column(sa.Float) 
+    total_assets            = sa.Column(sa.Numeric(precision=None))
+    total_liabilities       = sa.Column(sa.Numeric(precision=None))
+    total_equity            = sa.Column(sa.Numeric(precision=None))
     
     # Additional metrics
-    total_capitalization    = sa.Column(sa.Float)
-    common_stock_equity     = sa.Column(sa.Float)
-    capital_lease_obligations = sa.Column(sa.Float)
-    net_tangible_assets     = sa.Column(sa.Float)
-    working_capital         = sa.Column(sa.Float)
-    invested_capital        = sa.Column(sa.Float)
-    tangible_book_value     = sa.Column(sa.Float)
-    total_debt              = sa.Column(sa.Float)
+    total_capitalization    = sa.Column(sa.Numeric(precision=None))
+    common_stock_equity     = sa.Column(sa.Numeric(precision=None))
+    capital_lease_obligations = sa.Column(sa.Numeric(precision=None))
+    net_tangible_assets     = sa.Column(sa.Numeric(precision=None))
+    working_capital         = sa.Column(sa.Numeric(precision=None))
+    invested_capital        = sa.Column(sa.Numeric(precision=None))
+    tangible_book_value     = sa.Column(sa.Numeric(precision=None))
+    total_debt              = sa.Column(sa.Numeric(precision=None))
     
     # Share information
-    shares_issued           = sa.Column(sa.Float)
-    ordinary_shares_number  = sa.Column(sa.Float)
+    shares_issued           = sa.Column(sa.Numeric(precision=None))
+    ordinary_shares_number  = sa.Column(sa.Numeric(precision=None))
     
     # Timestamps
-    created_at              = sa.Column(sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now())
-    
-    __table_args__ = (
-        sa.UniqueConstraint("symbol", "date", "period_type", name="uix_balance_1"),
-    )
+    last_updated            = sa.Column(sa.DateTime, onupdate=sa.func.now())
     
     def __repr__(self):
         return f"BalanceSheet(symbol='{self.symbol}', date={self.date})"
 
 
 class CashFlow(Base):
-    __tablename__ = 'cash_flow'
-    id                      = sa.Column(sa.Integer, primary_key=True)
-    symbol                  = sa.Column(sa.String(10), index=True, nullable=False)
-    date                    = sa.Column(sa.Date, nullable=False)
-    period_type             = sa.Column(sa.String(10))
+    __tablename__ = 'cash_flows'
+    id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol                  = sa.Column(sa.String(255), index=True, nullable=False)
+    date                    = sa.Column(sa.DateTime, nullable=False)
+    period_type             = sa.Column(sa.String(10), nullable=False)
     
     # Main cash flow categories
-    operating_cash_flow     = sa.Column(sa.Float)
-    investing_cash_flow     = sa.Column(sa.Float)
-    financing_cash_flow     = sa.Column(sa.Float)
-    free_cash_flow          = sa.Column(sa.Float)
-    end_cash_position       = sa.Column(sa.Float)
+    operating_cash_flow     = sa.Column(sa.Numeric(precision=None))
+    investing_cash_flow     = sa.Column(sa.Numeric(precision=None))
+    financing_cash_flow     = sa.Column(sa.Numeric(precision=None))
+    free_cash_flow          = sa.Column(sa.Numeric(precision=None))
+    end_cash_position       = sa.Column(sa.Numeric(precision=None))
     
     # Detailed items
-    income_tax_paid         = sa.Column(sa.Float)
-    interest_paid           = sa.Column(sa.Float)
-    capital_expenditure     = sa.Column(sa.Float)
-    issuance_of_capital_stock = sa.Column(sa.Float)
-    issuance_of_debt        = sa.Column(sa.Float)
-    repayment_of_debt       = sa.Column(sa.Float)
+    income_tax_paid         = sa.Column(sa.Numeric(precision=None))
+    interest_paid           = sa.Column(sa.Numeric(precision=None))
+    capital_expenditure     = sa.Column(sa.Numeric(precision=None))
+    issuance_of_capital_stock = sa.Column(sa.Numeric(precision=None))
+    issuance_of_debt        = sa.Column(sa.Numeric(precision=None))
+    repayment_of_debt       = sa.Column(sa.Numeric(precision=None))
     
     # Timestamps
-    created_at              = sa.Column(sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now())
-    
-    __table_args__ = (
-        sa.UniqueConstraint("symbol", "date", "period_type", name="uix_cash_1"),
-    )
+    last_updated            = sa.Column(sa.DateTime, onupdate=sa.func.now())
     
     def __repr__(self):
         return f"CashFlow(symbol='{self.symbol}', date={self.date})"
@@ -260,8 +249,8 @@ class CashFlow(Base):
 class NewsArticle(Base):
     __tablename__ = 'news_articles'
     
-    id               = sa.Column(sa.Integer, primary_key=True)
-    symbol           = sa.Column(sa.String(10), index=True)
+    id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol           = sa.Column(sa.String(255), index=True)
     title            = sa.Column(sa.String(500))
     publisher        = sa.Column(sa.String(100))
     link             = sa.Column(sa.String(1000))
@@ -282,46 +271,46 @@ class NewsArticle(Base):
 
 ############################################################################################ equity_2_users data
 class Equity2User(Base):
-    __tablename__ = 'equity_2_users'
+    __tablename__ = 'equity_user_histories'
     
-    id                      = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    symbol                  = sa.Column(sa.String(10), index=True)
-    risk_type               = sa.Column(sa.String(20))  # 'Conservative', 'Aggressive', 'Moderate'
-    sector                  = sa.Column(sa.String(100))
-    volume_spike            = sa.Column(sa.String(20))
-    RSI                     = sa.Column(sa.Float)
-    ADR                     = sa.Column(sa.Float)
-    long_term_persistance   = sa.Column(sa.Float)
-    long_term_divergence    = sa.Column(sa.Float)
-    earnings_date_score     = sa.Column(sa.Float, default=0)
-    income_statement_score  = sa.Column(sa.Float, default=0)
-    cashflow_statement_score = sa.Column(sa.Float, default=0)
-    balance_sheet_score     = sa.Column(sa.Float, default=0)
-    rate_scoring            = sa.Column(sa.Float, default=0)
-    buy_point               = sa.Column(sa.Float)
-    short_point             = sa.Column(sa.Float)
-    recommended_date        = sa.Column(sa.DateTime, default=datetime.now)
-    is_active               = sa.Column(sa.Boolean, default=True)
-    status                  = sa.Column(sa.String(20), default='')
-    overbuy_oversold        = sa.Column(sa.Float)  # Scale from -100 to 100: negative = oversold, positive = overbought
-    created_at              = sa.Column(sa.DateTime, default=datetime.now)
-    updated_at              = sa.Column(sa.DateTime, default=datetime.now, onupdate=datetime.now)
+    id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol                  = sa.Column(sa.String(255), nullable=False)
+    risk_type               = sa.Column(sa.String(255), nullable=False)
+    sector                  = sa.Column(sa.String(255))
+    volume_spike            = sa.Column(sa.String(255), nullable=False)
+    RSI                     = sa.Column(sa.Numeric(precision=None), nullable=False)
+    ADR                     = sa.Column(sa.Numeric(precision=None), nullable=False)
+    long_term_persistance   = sa.Column(sa.Numeric(precision=None), nullable=False)
+    long_term_divergence    = sa.Column(sa.Numeric(precision=None), nullable=False)
+    earnings_date_score     = sa.Column(sa.Numeric(precision=None), nullable=False)
+    income_statement_score  = sa.Column(sa.Numeric(precision=None), nullable=False)
+    cashflow_statement_score = sa.Column(sa.Numeric(precision=None), nullable=False)
+    balance_sheet_score     = sa.Column(sa.Numeric(precision=None), nullable=False)
+    rate_scoring            = sa.Column(sa.Numeric(precision=None), nullable=False)
+    buy_point               = sa.Column(sa.Numeric(precision=None), nullable=False)
+    short_point             = sa.Column(sa.Numeric(precision=None), nullable=False)
+    recommended_date        = sa.Column(sa.DateTime, nullable=False)
+    is_active               = sa.Column(sa.Boolean, nullable=False)
+    status                  = sa.Column(sa.String(20), nullable=False)
+    overbuy_oversold        = sa.Column(sa.Numeric(precision=None), nullable=False)
+    created_at              = sa.Column(sa.DateTime)
+    updated_at              = sa.Column(sa.DateTime)
 
     def __repr__(self):
         return f"Equity2User(symbol='{self.symbol}', risk_type='{self.risk_type}', status='{self.status}')"
 
 
 class EquityTechnicalIndicator(Base):
-    __tablename__ = 'equity_technical_indicators'
+    __tablename__ = 'equity_technical_indicators_history'
     
-    id               = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    symbol           = sa.Column(sa.String(10), index=True)
-    date             = sa.Column(sa.Date, index=True)  # Date for this technical data point
-    mfi              = sa.Column(sa.Float)  # Money Flow Index
-    trend_intensity  = sa.Column(sa.Float)
-    persistent_ratio = sa.Column(sa.Float)
-    created_at       = sa.Column(sa.DateTime, default=datetime.now)
-    updated_at       = sa.Column(sa.DateTime, default=datetime.now, onupdate=datetime.now)
+    id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol           = sa.Column(sa.String(255), nullable=False)
+    date             = sa.Column(sa.DateTime, nullable=False)
+    mfi              = sa.Column(sa.Numeric(precision=None), nullable=False)
+    trend_intensity  = sa.Column(sa.Numeric(precision=None), nullable=False)
+    persistent_ratio = sa.Column(sa.Numeric(precision=None), nullable=False)
+    created_at       = sa.Column(sa.DateTime)
+    updated_at       = sa.Column(sa.DateTime)
 
     def __repr__(self):
         return f"EquityTechnicalIndicator(symbol='{self.symbol}', date={self.date})"
@@ -333,20 +322,17 @@ class Company(Base):
     __tablename__ = 'companies'
     
     symbol          = sa.Column(sa.String(10), primary_key=True)
-    company_name    = sa.Column(sa.String(255))
-    description     = sa.Column(sa.Text())
-    sector          = sa.Column(sa.String(100))
-    industry        = sa.Column(sa.String(100))
-    employees       = sa.Column(sa.Integer)
-    website         = sa.Column(sa.String(255))
-    updated_at      = sa.Column(sa.String(50))
+    company_name    = sa.Column(sa.String(255), nullable=False)
+    description     = sa.Column(sa.Text, nullable=False)
+    sector          = sa.Column(sa.String(100), nullable=False)
+    industry        = sa.Column(sa.String(100), nullable=False)
+    employees       = sa.Column(sa.Integer, nullable=False)
+    website         = sa.Column(sa.String(255), nullable=False)
+    created_at      = sa.Column(sa.DateTime)
+    updated_at      = sa.Column(sa.DateTime)
     
     # Relationships
     executives      = relationship("Executive", back_populates="company", cascade="all, delete-orphan")
-    
-    __table_args__ = (
-        {"mysql_charset": "utf8mb4", "mysql_engine": "InnoDB"},
-    )
     
     def __repr__(self):
         return f"Company(symbol='{self.symbol}', company_name='{self.company_name}')"
@@ -355,19 +341,17 @@ class Company(Base):
 class Executive(Base):
     __tablename__ = 'executives'
     
-    id              = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
+    id              = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
     company_symbol  = sa.Column(sa.String(10), sa.ForeignKey("companies.symbol"))
-    name            = sa.Column(sa.String(255))
-    title           = sa.Column(sa.String(255))
-    year_born       = sa.Column(sa.Integer)
-    compensation    = sa.Column(sa.Float)
+    name            = sa.Column(sa.String(255), nullable=False)
+    title           = sa.Column(sa.String(255), nullable=False)
+    year_born       = sa.Column(sa.Integer, nullable=False)
+    compensation    = sa.Column(sa.Numeric(8, 2), nullable=False)
+    created_at      = sa.Column(sa.DateTime)
+    updated_at      = sa.Column(sa.DateTime)
     
     # Relationships
     company         = relationship("Company", back_populates="executives")
-    
-    __table_args__ = (
-        {"mysql_charset": "utf8mb4", "mysql_engine": "InnoDB"},
-    )
     
     def __repr__(self):
         return f"Executive(name='{self.name}', company_symbol='{self.company_symbol}', title='{self.title}')"
