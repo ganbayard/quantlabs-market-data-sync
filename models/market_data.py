@@ -381,5 +381,11 @@ class NewsArticle(Base):
     updated_at       = sa.Column(mysql.TIMESTAMP, nullable=True)
     thumbnail        = sa.Column(sa.String(255), nullable=True)
     
+    __table_args__ = (
+        sa.UniqueConstraint('symbol', 'title', 'published_date', name='uix_news_1'),
+        sa.Index('ix_news_articles_published_date', 'published_date'),
+        sa.Index('ix_news_articles_symbol', 'symbol'),
+    )
+    
     def __repr__(self):
         return f"NewsArticle(symbol='{self.symbol}', title='{self.title[:30]}...', date='{self.published_date}')"

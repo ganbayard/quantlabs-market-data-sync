@@ -151,7 +151,7 @@ def add_holdings_by_etf_symbol(session, etf_symbol, holdings_df):
 
                 new_holding = IShareETFHolding(
                     ishare_etf_id=etf_instance.id,
-                    ticker=ticker,  # Can be NULL now
+                    ticker=ticker,
                     name=name,
                     sector=sector,
                     asset_class=asset_class,
