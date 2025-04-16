@@ -6,8 +6,10 @@ import math
 import threading
 import time
 import random
+import numpy as np
+import pandas as pd
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy import func 
 
@@ -58,6 +60,7 @@ class Stats:
         self.bars_added = 0
         self.bars_updated = 0
         self.failed = 0
+        self.skipped_bars = 0
         self.lock = threading.Lock()
         self.total_symbols = total_symbols
         self.start_time = datetime.now()
@@ -72,7 +75,7 @@ class Stats:
                 
                 logger.info(f"Rate: {symbols_per_minute:.1f} symbols/min, Est. remaining: {remaining:.1f} minutes")
                 logger.info(f"Progress: {self.processed}/{self.total_symbols} ({(self.processed/self.total_symbols)*100:.1f}%)")
-                logger.info(f"Bars added: {self.bars_added}, Bars updated: {self.bars_updated}, Failed: {self.failed}")
+                logger.info(f"Bars added: {self.bars_added}, Bars updated: {self.bars_updated}, Failed: {self.failed}, Skipped: {self.skipped_bars}")
 
 
 def get_thread_session():
@@ -80,6 +83,18 @@ def get_thread_session():
     if not hasattr(thread_local, "session"):
         thread_local.session = Session()
     return thread_local.session
+
+
+def normalize_timestamp(timestamp):
+    """Convert timezone-aware timestamp to naive datetime"""
+    if timestamp is None:
+        return None
+    
+    # If timestamp has timezone info, convert to UTC and remove tz info
+    if hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is not None:
+        # Convert to UTC time using the properly imported timezone
+        return timestamp.astimezone(timezone.utc).replace(tzinfo=None)
+    return timestamp
 
 
 def get_date_range(period=None, start_date=None):
@@ -133,6 +148,7 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
     session = get_thread_session()
     added = 0
     updated = 0
+    skipped = 0
     
     try:
         # Load data from source
@@ -154,12 +170,18 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
                 close_price = row.get('Close', row.get('close', None))
                 volume = row.get('Volume', row.get('volume', None))
                 
-                # Skip rows with missing data
-                if any(x is None for x in [open_price, high_price, low_price, close_price, volume]):
+                # Check for NaN or None values and skip the record if any are found
+                if (pd.isna(open_price) or pd.isna(high_price) or pd.isna(low_price) or 
+                    pd.isna(close_price) or pd.isna(volume) or
+                    open_price is None or high_price is None or 
+                    low_price is None or close_price is None or volume is None):
+                    logger.debug(f"Skipping bar with NaN values for {symbol} at {index}")
+                    skipped += 1
                     continue
                 
-                # Check if the record already exists
+                # Convert timestamp - handle timezone info
                 timestamp = index.to_pydatetime() if hasattr(index, 'to_pydatetime') else index
+                timestamp = normalize_timestamp(timestamp)
                 
                 existing_record = None
                 if not force_update:
@@ -167,24 +189,43 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
                         symbol=symbol, timestamp=timestamp
                     ).first()
                 
+                # Ensure float conversions are safe
+                try:
+                    open_val = float(open_price)
+                    high_val = float(high_price)
+                    low_val = float(low_price)
+                    close_val = float(close_price)
+                    vol_val = int(float(volume))
+                    
+                    # Additional safety check
+                    if (np.isnan(open_val) or np.isnan(high_val) or 
+                        np.isnan(low_val) or np.isnan(close_val)):
+                        logger.debug(f"Skipping bar with NaN after conversion for {symbol} at {index}")
+                        skipped += 1
+                        continue
+                except (ValueError, TypeError):
+                    logger.debug(f"Skipping bar with invalid values for {symbol} at {index}")
+                    skipped += 1
+                    continue
+                
                 if existing_record:
                     # Update the existing record
-                    existing_record.open = float(open_price)
-                    existing_record.high = float(high_price)
-                    existing_record.low = float(low_price)
-                    existing_record.close = float(close_price)
-                    existing_record.volume = float(volume)
+                    existing_record.open = open_val
+                    existing_record.high = high_val
+                    existing_record.low = low_val
+                    existing_record.close = close_val
+                    existing_record.volume = vol_val
                     updated += 1
                 else:
                     # Insert new record
                     bar_data = YfBar1d(
                         symbol=symbol,
                         timestamp=timestamp,
-                        open=float(open_price),
-                        high=float(high_price),
-                        low=float(low_price),
-                        close=float(close_price),
-                        volume=float(volume)
+                        open=open_val,
+                        high=high_val,
+                        low=low_val,
+                        close=close_val,
+                        volume=vol_val
                     )
                     session.add(bar_data)
                     added += 1
@@ -195,18 +236,30 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
                     
             except Exception as e:
                 logger.error(f"Error processing bar for {symbol} at {index}: {e}")
+                session.rollback()  # Important: Roll back on error
                 continue
         
         # Final commit for any remaining records
-        session.commit()
-        stats.increment('bars_added', added)
-        stats.increment('bars_updated', updated)
-        stats.increment('successful')
-        logger.info(f"Processed {symbol}: {added} bars added, {updated} bars updated")
-        return added, updated
+        try:
+            session.commit()
+            stats.increment('bars_added', added)
+            stats.increment('bars_updated', updated)
+            stats.increment('skipped_bars', skipped)
+            stats.increment('successful')
+            logger.info(f"Processed {symbol}: {added} bars added, {updated} bars updated, {skipped} bars skipped")
+            return added, updated
+        except Exception as e:
+            logger.error(f"Error in final commit for {symbol}: {e}")
+            session.rollback()
+            stats.increment('failed')
+            return 0, 0
         
     except Exception as e:
         logger.error(f"Error processing {symbol}: {e}")
+        try:
+            session.rollback()
+        except:
+            pass  # Ignore if rollback fails
         stats.increment('failed')
         return 0, 0
     finally:
@@ -219,9 +272,13 @@ def process_symbol_batch(symbols, start_date, end_date, data_source, force_updat
     logger.info(f"[{thread_name}] Starting batch processing of {len(symbols)} symbols")
     
     for symbol in symbols:
-        process_symbol(symbol, start_date, end_date, data_source, force_update)
-        # Add a small delay to avoid hammering the API
-        time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+        try:
+            process_symbol(symbol, start_date, end_date, data_source, force_update)
+            # Add a small delay to avoid hammering the API
+            time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
+        except Exception as e:
+            logger.error(f"Unexpected error processing {symbol}: {str(e)}")
+            # Continue with next symbol
     
     logger.info(f"[{thread_name}] Completed batch processing")
 
@@ -413,6 +470,7 @@ def main():
     logger.info(f"Failed: {stats.failed}")
     logger.info(f"Total bars added: {stats.bars_added}")
     logger.info(f"Total bars updated: {stats.bars_updated}")
+    logger.info(f"Total bars skipped: {stats.skipped_bars}")
     logger.info(f"Total processing time: {elapsed_time:.1f} minutes")
     
     if elapsed_time > 0:
