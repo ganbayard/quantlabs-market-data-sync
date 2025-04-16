@@ -2,6 +2,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm import DeclarativeBase
 from datetime import datetime
+from sqlalchemy.dialects import mysql
 
 class Base(DeclarativeBase):
     pass
@@ -11,14 +12,20 @@ class Base(DeclarativeBase):
 class YfBar1d(Base):
     __tablename__ = 'yf_daily_bar'
     id        = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
-    symbol    = sa.Column(sa.String(255))  
-    timestamp = sa.Column(sa.DateTime)
-    open      = sa.Column(sa.Numeric(10, 4))
-    high      = sa.Column(sa.Numeric(10, 4))
-    low       = sa.Column(sa.Numeric(10, 4))
-    close     = sa.Column(sa.Numeric(10, 4))
-    volume    = sa.Column(sa.BigInteger)
-    __table_args__ = (sa.UniqueConstraint('symbol', 'timestamp', name='yf_daily_bar_symbol_timestamp_unique'),)
+    symbol    = sa.Column(sa.String(255), nullable=False)  
+    timestamp = sa.Column(sa.DateTime, nullable=False)
+    # Using DECIMAL to match production DDL
+    open      = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=False)
+    high      = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=False)
+    low       = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=False)
+    close     = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=False)
+    volume    = sa.Column(sa.BigInteger, nullable=False)
+    __table_args__ = (
+        sa.UniqueConstraint('symbol', 'timestamp', name='yf_daily_bar_symbol_timestamp_unique'),
+        sa.Index('yf_daily_bar_symbol_index', 'symbol'),
+        sa.Index('yf_daily_bar_timestamp_index', 'timestamp'),
+        sa.ForeignKeyConstraint(['symbol'], ['symbol_fields.symbol'], name='yf_daily_bar_symbol_foreign', ondelete='CASCADE'),
+    )
     def __repr__(self):
         return f"YfBar1d(symbol='{self.symbol}', timestamp={self.timestamp})"
     def get_tuple(self):
@@ -40,10 +47,10 @@ class SymbolFields(Base):
     id           = sa.Column(sa.Integer, primary_key=True)
     symbol       = sa.Column(sa.String(255), unique=True, nullable=False)  
     company_name = sa.Column(sa.String(255))  
-    price        = sa.Column(sa.Numeric(10, 4))
-    change       = sa.Column(sa.Numeric(10, 4))
+    price        = sa.Column(sa.Float)  # Using Float to match DOUBLE in database
+    change       = sa.Column(sa.Float, key='change')  # Using key to handle reserved SQL keyword
     volume       = sa.Column(sa.BigInteger)
-    market_cap   = sa.Column(sa.Numeric(20, 2))
+    market_cap   = sa.Column(sa.Float)  # Using Float to match DOUBLE in database
     market       = sa.Column(sa.String(100))  
     sector       = sa.Column(sa.String(100))  
     industry     = sa.Column(sa.String(100))  
@@ -52,10 +59,13 @@ class SymbolFields(Base):
     indexes      = sa.Column(sa.Text)
     country      = sa.Column(sa.String(50))  
     exchange     = sa.Column(sa.String(50))  
-    updated_at   = sa.Column(sa.DateTime, server_default=sa.func.now(), onupdate=sa.func.now())
+    updated_at   = sa.Column(mysql.TIMESTAMP, server_default=sa.func.now(), onupdate=sa.func.now())
+
+    # Adding relationship for yf_daily_bar
+    daily_bars = relationship("YfBar1d", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
-        return f"SectorUpdate(symbol='{self.symbol}', sector='{self.sector}')"
+        return f"SymbolFields(symbol='{self.symbol}', sector='{self.sector}')"
     
 
 ############################################################################################ Sector rotation data
@@ -66,10 +76,10 @@ class MmtvDailyBar(Base):
     date       = sa.Column(sa.DateTime, primary_key=True)
     field_name = sa.Column(sa.String(255), primary_key=True)  
     field_type = sa.Column(sa.String(255), primary_key=True)  
-    open       = sa.Column(sa.Numeric(8, 2))
-    high       = sa.Column(sa.Numeric(8, 2))
-    low        = sa.Column(sa.Numeric(8, 2))
-    close      = sa.Column(sa.Numeric(8, 2))
+    open       = sa.Column(mysql.DOUBLE(precision=8, scale=2))  # Using DOUBLE to match double(8,2) in database
+    high       = sa.Column(mysql.DOUBLE(precision=8, scale=2))  # Using DOUBLE to match double(8,2) in database
+    low        = sa.Column(mysql.DOUBLE(precision=8, scale=2))  # Using DOUBLE to match double(8,2) in database
+    close      = sa.Column(mysql.DOUBLE(precision=8, scale=2))  # Using DOUBLE to match double(8,2) in database
 
     def __repr__(self):
         return f"MmtvDailyBar(date='{self.date}', field_name='{self.field_name}', field_type='{self.field_type}', open={self.open}, high={self.high}, low={self.low}, close={self.close})"
@@ -92,13 +102,16 @@ class IShareETF(Base):
     region          = sa.Column(sa.String(255))
     product_url     = sa.Column(sa.String(255))
     product_id      = sa.Column(sa.String(255))
-    net_assets      = sa.Column(sa.Numeric(20, 2))
+    net_assets      = sa.Column(mysql.DECIMAL(precision=20, scale=2))  # Match production precision
     fund_type       = sa.Column(sa.String(255))
     provider        = sa.Column(sa.String(255))
     exchange        = sa.Column(sa.String(255))
     benchmark       = sa.Column(sa.String(255))
-    created_at      = sa.Column(sa.DateTime)
-    updated_at      = sa.Column(sa.DateTime)
+    created_at      = sa.Column(mysql.TIMESTAMP)  # Using TIMESTAMP to match production
+    updated_at      = sa.Column(mysql.TIMESTAMP)  # Using TIMESTAMP to match production
+
+    # Define relationship with holdings
+    holdings = relationship('IShareETFHolding', back_populates='ishare_etf', cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"IShareETF(ticker='{self.ticker}', fund_name='{self.fund_name}')"
@@ -107,78 +120,86 @@ class IShareETF(Base):
 class IShareETFHolding(Base):
     __tablename__ = 'ishare_etf_holding'
     id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
-    ishare_etf_id    = sa.Column(sa.BigInteger, sa.ForeignKey('ishare_etf.id'), nullable=False)
+    ishare_etf_id    = sa.Column(sa.BigInteger, sa.ForeignKey('ishare_etf.id', ondelete='CASCADE'), nullable=False)
     ticker           = sa.Column(sa.String(255))
     name             = sa.Column(sa.String(255), nullable=False)
-    sector           = sa.Column(sa.String(255))
+    sector           = sa.Column(sa.String(255), server_default='Other')
     asset_class      = sa.Column(sa.String(255), nullable=False)
-    market_value     = sa.Column(sa.Numeric(20, 2), nullable=False)
-    weight           = sa.Column(sa.Numeric(10, 4), nullable=False)
-    notional_value   = sa.Column(sa.Numeric(20, 2), nullable=False)
-    amount           = sa.Column(sa.Numeric(20, 2), nullable=False)
-    price            = sa.Column(sa.Numeric(20, 2), nullable=False)
+    market_value     = sa.Column(mysql.DECIMAL(precision=20, scale=2), nullable=False)  # Match production precision
+    weight           = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=False)  # Match production precision
+    notional_value   = sa.Column(mysql.DECIMAL(precision=20, scale=2), nullable=False)  # Match production precision
+    amount           = sa.Column(mysql.DECIMAL(precision=20, scale=2), nullable=False)  # Match production precision
+    price            = sa.Column(mysql.DECIMAL(precision=20, scale=2), nullable=False)  # Match production precision
     location         = sa.Column(sa.String(255))
     exchange         = sa.Column(sa.String(255))
     currency         = sa.Column(sa.String(255))
-    fx_rate          = sa.Column(sa.Numeric(10, 4), nullable=False)
-    market_currency  = sa.Column(sa.String(255))
+    fx_rate          = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=False)  # Match production precision
+    market_currency  = sa.Column(sa.String(255), server_default='USD')
     accrual_date     = sa.Column(sa.Date)
     fund_ticker      = sa.Column(sa.String(255), nullable=False)
     as_of_date       = sa.Column(sa.Date, nullable=False)
-    created_at       = sa.Column(sa.DateTime)
-    updated_at       = sa.Column(sa.DateTime)
+    created_at       = sa.Column(mysql.TIMESTAMP)  # Using TIMESTAMP to match production
+    updated_at       = sa.Column(mysql.TIMESTAMP)  # Using TIMESTAMP to match production
+    
+    # Define relationship with parent ETF
     ishare_etf       = relationship('IShareETF', back_populates='holdings')
+    
+    __table_args__ = (
+        sa.Index('ishare_etf_holding_ishare_etf_id_foreign', 'ishare_etf_id'),
+    )
     
     def __repr__(self) -> str:
         return f"IShareETFHolding(ticker='{self.ticker}', ishare_etf_id={self.ishare_etf_id})"
 
-IShareETF.holdings = relationship('IShareETFHolding', order_by=IShareETFHolding.id, back_populates='ishare_etf')
-
 
 ############################################################################################ Financial details data
-## income_statement, balance_sheet, cash_flow, news_articles
+## income_statement, balance_sheet, cash_flow
 
 class IncomeStatement(Base):
     __tablename__ = 'income_statements'
     id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
-    symbol                  = sa.Column(sa.String(255), index=True, nullable=False)
+    symbol                  = sa.Column(sa.String(255), nullable=False)
     date                    = sa.Column(sa.DateTime, nullable=False)
     period_type             = sa.Column(sa.String(10), nullable=False)
     
-    # Revenue and profitability
-    total_revenue           = sa.Column(sa.Numeric(precision=None))
-    cost_of_revenue         = sa.Column(sa.Numeric(precision=None))
-    gross_profit            = sa.Column(sa.Numeric(precision=None))
+    # Revenue and profitability - using mysql.DOUBLE to match 'double' in production
+    total_revenue           = sa.Column(mysql.DOUBLE)
+    cost_of_revenue         = sa.Column(mysql.DOUBLE)
+    gross_profit            = sa.Column(mysql.DOUBLE)
     
     # Operating metrics
-    operating_expense       = sa.Column(sa.Numeric(precision=None))
-    operating_income        = sa.Column(sa.Numeric(precision=None))
-    total_operating_income  = sa.Column(sa.Numeric(precision=None))
-    total_expenses          = sa.Column(sa.Numeric(precision=None))
+    operating_expense       = sa.Column(mysql.DOUBLE)
+    operating_income        = sa.Column(mysql.DOUBLE)
+    total_operating_income  = sa.Column(mysql.DOUBLE)
+    total_expenses          = sa.Column(mysql.DOUBLE)
     
     # Non-operating items
-    net_non_operating_interest = sa.Column(sa.Numeric(precision=None))
-    other_income_expense    = sa.Column(sa.Numeric(precision=None))
-    pretax_income           = sa.Column(sa.Numeric(precision=None))
-    tax_provision           = sa.Column(sa.Numeric(precision=None))
+    net_non_operating_interest = sa.Column(mysql.DOUBLE)
+    other_income_expense    = sa.Column(mysql.DOUBLE)
+    pretax_income           = sa.Column(mysql.DOUBLE)
+    tax_provision           = sa.Column(mysql.DOUBLE)
     
     # Net income and EPS
-    net_income              = sa.Column(sa.Numeric(precision=None))
-    normalized_income       = sa.Column(sa.Numeric(precision=None))
-    basic_shares            = sa.Column(sa.Numeric(precision=None))
-    diluted_shares          = sa.Column(sa.Numeric(precision=None))
-    basic_eps               = sa.Column(sa.Numeric(precision=None))
-    diluted_eps             = sa.Column(sa.Numeric(precision=None))
+    net_income              = sa.Column(mysql.DOUBLE)
+    normalized_income       = sa.Column(mysql.DOUBLE)
+    basic_shares            = sa.Column(mysql.DOUBLE)
+    diluted_shares          = sa.Column(mysql.DOUBLE)
+    basic_eps               = sa.Column(mysql.DOUBLE)
+    diluted_eps             = sa.Column(mysql.DOUBLE)
     
     # Additional metrics
-    ebit                    = sa.Column(sa.Numeric(precision=None))
-    ebitda                  = sa.Column(sa.Numeric(precision=None))
-    interest_income         = sa.Column(sa.Numeric(precision=None))
-    interest_expense        = sa.Column(sa.Numeric(precision=None))
-    net_interest_income     = sa.Column(sa.Numeric(precision=None))
+    ebit                    = sa.Column(mysql.DOUBLE)
+    ebitda                  = sa.Column(mysql.DOUBLE)
+    interest_income         = sa.Column(mysql.DOUBLE)
+    interest_expense        = sa.Column(mysql.DOUBLE)
+    net_interest_income     = sa.Column(mysql.DOUBLE)
     
-    # Timestamps
-    last_updated            = sa.Column(sa.DateTime, onupdate=sa.func.now())
+    # Timestamps - use TIMESTAMP to match production
+    last_updated            = sa.Column(mysql.TIMESTAMP, server_onupdate=sa.func.current_timestamp())
+    
+    __table_args__ = (
+        sa.Index('income_statements_symbol_index', 'symbol'),
+    )
     
     def __repr__(self):
         return f"IncomeStatement(symbol='{self.symbol}', date={self.date})"
@@ -187,31 +208,35 @@ class IncomeStatement(Base):
 class BalanceSheet(Base):
     __tablename__ = 'balance_sheets'
     id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
-    symbol                  = sa.Column(sa.String(255), index=True, nullable=False)
+    symbol                  = sa.Column(sa.String(255), nullable=False)
     date                    = sa.Column(sa.DateTime, nullable=False)
     period_type             = sa.Column(sa.String(10), nullable=False)
     
-    # Main categories
-    total_assets            = sa.Column(sa.Numeric(precision=None))
-    total_liabilities       = sa.Column(sa.Numeric(precision=None))
-    total_equity            = sa.Column(sa.Numeric(precision=None))
+    # Main categories - using mysql.DOUBLE to match 'double' in production
+    total_assets            = sa.Column(mysql.DOUBLE)
+    total_liabilities       = sa.Column(mysql.DOUBLE)
+    total_equity            = sa.Column(mysql.DOUBLE)
     
     # Additional metrics
-    total_capitalization    = sa.Column(sa.Numeric(precision=None))
-    common_stock_equity     = sa.Column(sa.Numeric(precision=None))
-    capital_lease_obligations = sa.Column(sa.Numeric(precision=None))
-    net_tangible_assets     = sa.Column(sa.Numeric(precision=None))
-    working_capital         = sa.Column(sa.Numeric(precision=None))
-    invested_capital        = sa.Column(sa.Numeric(precision=None))
-    tangible_book_value     = sa.Column(sa.Numeric(precision=None))
-    total_debt              = sa.Column(sa.Numeric(precision=None))
+    total_capitalization    = sa.Column(mysql.DOUBLE)
+    common_stock_equity     = sa.Column(mysql.DOUBLE)
+    capital_lease_obligations = sa.Column(mysql.DOUBLE)
+    net_tangible_assets     = sa.Column(mysql.DOUBLE)
+    working_capital         = sa.Column(mysql.DOUBLE)
+    invested_capital        = sa.Column(mysql.DOUBLE)
+    tangible_book_value     = sa.Column(mysql.DOUBLE)
+    total_debt              = sa.Column(mysql.DOUBLE)
     
     # Share information
-    shares_issued           = sa.Column(sa.Numeric(precision=None))
-    ordinary_shares_number  = sa.Column(sa.Numeric(precision=None))
+    shares_issued           = sa.Column(mysql.DOUBLE)
+    ordinary_shares_number  = sa.Column(mysql.DOUBLE)
     
-    # Timestamps
-    last_updated            = sa.Column(sa.DateTime, onupdate=sa.func.now())
+    # Timestamps - use TIMESTAMP to match production
+    last_updated            = sa.Column(mysql.TIMESTAMP, server_onupdate=sa.func.current_timestamp())
+    
+    __table_args__ = (
+        sa.Index('balance_sheets_symbol_index', 'symbol'),
+    )
     
     def __repr__(self):
         return f"BalanceSheet(symbol='{self.symbol}', date={self.date})"
@@ -220,56 +245,37 @@ class BalanceSheet(Base):
 class CashFlow(Base):
     __tablename__ = 'cash_flows'
     id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
-    symbol                  = sa.Column(sa.String(255), index=True, nullable=False)
+    symbol                  = sa.Column(sa.String(255), nullable=False)
     date                    = sa.Column(sa.DateTime, nullable=False)
     period_type             = sa.Column(sa.String(10), nullable=False)
     
-    # Main cash flow categories
-    operating_cash_flow     = sa.Column(sa.Numeric(precision=None))
-    investing_cash_flow     = sa.Column(sa.Numeric(precision=None))
-    financing_cash_flow     = sa.Column(sa.Numeric(precision=None))
-    free_cash_flow          = sa.Column(sa.Numeric(precision=None))
-    end_cash_position       = sa.Column(sa.Numeric(precision=None))
+    # Main cash flow categories - using mysql.DOUBLE to match 'double' in production
+    operating_cash_flow     = sa.Column(mysql.DOUBLE)
+    investing_cash_flow     = sa.Column(mysql.DOUBLE)
+    financing_cash_flow     = sa.Column(mysql.DOUBLE)
+    free_cash_flow          = sa.Column(mysql.DOUBLE)
+    end_cash_position       = sa.Column(mysql.DOUBLE)
     
     # Detailed items
-    income_tax_paid         = sa.Column(sa.Numeric(precision=None))
-    interest_paid           = sa.Column(sa.Numeric(precision=None))
-    capital_expenditure     = sa.Column(sa.Numeric(precision=None))
-    issuance_of_capital_stock = sa.Column(sa.Numeric(precision=None))
-    issuance_of_debt        = sa.Column(sa.Numeric(precision=None))
-    repayment_of_debt       = sa.Column(sa.Numeric(precision=None))
+    income_tax_paid         = sa.Column(mysql.DOUBLE)
+    interest_paid           = sa.Column(mysql.DOUBLE)
+    capital_expenditure     = sa.Column(mysql.DOUBLE)
+    issuance_of_capital_stock = sa.Column(mysql.DOUBLE)
+    issuance_of_debt        = sa.Column(mysql.DOUBLE)
+    repayment_of_debt       = sa.Column(mysql.DOUBLE)
     
-    # Timestamps
-    last_updated            = sa.Column(sa.DateTime, onupdate=sa.func.now())
+    # Timestamps - use TIMESTAMP to match production
+    last_updated            = sa.Column(mysql.TIMESTAMP, server_onupdate=sa.func.current_timestamp())
+    
+    __table_args__ = (
+        sa.Index('cash_flows_symbol_index', 'symbol'),
+    )
     
     def __repr__(self):
         return f"CashFlow(symbol='{self.symbol}', date={self.date})"
 
 
-class NewsArticle(Base):
-    __tablename__ = 'news_articles'
-    
-    id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
-    symbol           = sa.Column(sa.String(255), index=True)
-    title            = sa.Column(sa.String(500))
-    publisher        = sa.Column(sa.String(100))
-    link             = sa.Column(sa.String(1000))
-    published_date   = sa.Column(sa.DateTime, index=True)
-    type             = sa.Column(sa.String(50))
-    related_symbols  = sa.Column(sa.String(200))
-    preview_text     = sa.Column(sa.Text)
-    thumbnail        = sa.Column(sa.String(1000))
-    created_at       = sa.Column(sa.DateTime, default=datetime.now)
-    
-    __table_args__ = (
-        sa.UniqueConstraint('symbol', 'title', 'published_date', name='uix_news_1'),
-    )
-    
-    def __repr__(self):
-        return f"NewsArticles(symbol='{self.symbol}', title='{self.title[:30]}...', date='{self.published_date}')"
-
-
-############################################################################################ equity_2_users data
+############################################################################################ equity_user_histories data
 class Equity2User(Base):
     __tablename__ = 'equity_user_histories'
     
@@ -278,23 +284,23 @@ class Equity2User(Base):
     risk_type               = sa.Column(sa.String(255), nullable=False)
     sector                  = sa.Column(sa.String(255))
     volume_spike            = sa.Column(sa.String(255), nullable=False)
-    RSI                     = sa.Column(sa.Numeric(precision=None), nullable=False)
-    ADR                     = sa.Column(sa.Numeric(precision=None), nullable=False)
-    long_term_persistance   = sa.Column(sa.Numeric(precision=None), nullable=False)
-    long_term_divergence    = sa.Column(sa.Numeric(precision=None), nullable=False)
-    earnings_date_score     = sa.Column(sa.Numeric(precision=None), nullable=False)
-    income_statement_score  = sa.Column(sa.Numeric(precision=None), nullable=False)
-    cashflow_statement_score = sa.Column(sa.Numeric(precision=None), nullable=False)
-    balance_sheet_score     = sa.Column(sa.Numeric(precision=None), nullable=False)
-    rate_scoring            = sa.Column(sa.Numeric(precision=None), nullable=False)
-    buy_point               = sa.Column(sa.Numeric(precision=None), nullable=False)
-    short_point             = sa.Column(sa.Numeric(precision=None), nullable=False)
-    recommended_date        = sa.Column(sa.DateTime, nullable=False)
+    RSI                     = sa.Column(mysql.DOUBLE, nullable=False)  # Using DOUBLE to match 'double' in production
+    ADR                     = sa.Column(mysql.DOUBLE, nullable=False)
+    long_term_persistance   = sa.Column(mysql.DOUBLE, nullable=False)
+    long_term_divergence    = sa.Column(mysql.DOUBLE, nullable=False)
+    earnings_date_score     = sa.Column(mysql.DOUBLE, nullable=False)
+    income_statement_score  = sa.Column(mysql.DOUBLE, nullable=False)
+    cashflow_statement_score = sa.Column(mysql.DOUBLE, nullable=False)
+    balance_sheet_score     = sa.Column(mysql.DOUBLE, nullable=False)
+    rate_scoring            = sa.Column(mysql.DOUBLE, nullable=False)
+    buy_point               = sa.Column(mysql.DOUBLE, nullable=False)
+    short_point             = sa.Column(mysql.DOUBLE, nullable=False)
+    recommended_date        = sa.Column(mysql.TIMESTAMP, nullable=False)  # Changed to TIMESTAMP to match production
     is_active               = sa.Column(sa.Boolean, nullable=False)
     status                  = sa.Column(sa.String(20), nullable=False)
-    overbuy_oversold        = sa.Column(sa.Numeric(precision=None), nullable=False)
-    created_at              = sa.Column(sa.DateTime)
-    updated_at              = sa.Column(sa.DateTime)
+    overbuy_oversold        = sa.Column(mysql.DOUBLE, nullable=False)
+    created_at              = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
+    updated_at              = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
 
     def __repr__(self):
         return f"Equity2User(symbol='{self.symbol}', risk_type='{self.risk_type}', status='{self.status}')"
@@ -305,12 +311,12 @@ class EquityTechnicalIndicator(Base):
     
     id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
     symbol           = sa.Column(sa.String(255), nullable=False)
-    date             = sa.Column(sa.DateTime, nullable=False)
-    mfi              = sa.Column(sa.Numeric(precision=None), nullable=False)
-    trend_intensity  = sa.Column(sa.Numeric(precision=None), nullable=False)
-    persistent_ratio = sa.Column(sa.Numeric(precision=None), nullable=False)
-    created_at       = sa.Column(sa.DateTime)
-    updated_at       = sa.Column(sa.DateTime)
+    date             = sa.Column(mysql.TIMESTAMP, nullable=False)  # Changed to TIMESTAMP to match production
+    mfi              = sa.Column(mysql.DOUBLE, nullable=False)  # Using DOUBLE to match 'double' in production
+    trend_intensity  = sa.Column(mysql.DOUBLE, nullable=False)
+    persistent_ratio = sa.Column(mysql.DOUBLE, nullable=False)
+    created_at       = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
+    updated_at       = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
 
     def __repr__(self):
         return f"EquityTechnicalIndicator(symbol='{self.symbol}', date={self.date})"
@@ -328,8 +334,8 @@ class Company(Base):
     industry        = sa.Column(sa.String(100), nullable=False)
     employees       = sa.Column(sa.Integer, nullable=False)
     website         = sa.Column(sa.String(255), nullable=False)
-    created_at      = sa.Column(sa.DateTime)
-    updated_at      = sa.Column(sa.DateTime)
+    created_at      = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
+    updated_at      = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
     
     # Relationships
     executives      = relationship("Executive", back_populates="company", cascade="all, delete-orphan")
@@ -346,9 +352,9 @@ class Executive(Base):
     name            = sa.Column(sa.String(255), nullable=False)
     title           = sa.Column(sa.String(255), nullable=False)
     year_born       = sa.Column(sa.Integer, nullable=False)
-    compensation    = sa.Column(sa.Numeric(8, 2), nullable=False)
-    created_at      = sa.Column(sa.DateTime)
-    updated_at      = sa.Column(sa.DateTime)
+    compensation    = sa.Column(mysql.DOUBLE(precision=8, scale=2), nullable=False)  # Changed to DOUBLE(8,2) to match production
+    created_at      = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
+    updated_at      = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
     
     # Relationships
     company         = relationship("Company", back_populates="executives")
@@ -357,3 +363,23 @@ class Executive(Base):
         return f"Executive(name='{self.name}', company_symbol='{self.company_symbol}', title='{self.title}')"
 
 
+############################################################################################ News Articles data
+
+class NewsArticle(Base):
+    __tablename__ = 'news_articles'
+    
+    id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol           = sa.Column(sa.String(10), nullable=False)
+    title            = sa.Column(sa.String(500), nullable=False)
+    publisher        = sa.Column(sa.String(100), nullable=False)
+    link             = sa.Column(sa.String(1000), nullable=False)
+    published_date   = sa.Column(sa.DateTime, nullable=False)
+    type             = sa.Column(sa.String(50), nullable=False)
+    related_symbols  = sa.Column(sa.String(200), nullable=False)
+    preview_text     = sa.Column(sa.Text, nullable=False)
+    created_at       = sa.Column(mysql.TIMESTAMP, nullable=True)
+    updated_at       = sa.Column(mysql.TIMESTAMP, nullable=True)
+    thumbnail        = sa.Column(sa.String(255), nullable=True)
+    
+    def __repr__(self):
+        return f"NewsArticle(symbol='{self.symbol}', title='{self.title[:30]}...', date='{self.published_date}')"
