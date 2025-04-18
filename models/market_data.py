@@ -41,24 +41,25 @@ class YfBar1d(Base):
 
 ############################################################################################ Daily Changes data
 
+
 class SymbolFields(Base):
     __tablename__ = 'symbol_fields'
 
     id           = sa.Column(sa.Integer, primary_key=True)
-    symbol       = sa.Column(sa.String(255), unique=True, nullable=False)  
-    company_name = sa.Column(sa.String(255))  
-    price        = sa.Column(sa.Float)  # Using Float to match DOUBLE in database
-    change       = sa.Column(sa.Float, key='change')  # Using key to handle reserved SQL keyword
-    volume       = sa.Column(sa.BigInteger)
-    market_cap   = sa.Column(sa.Float)  # Using Float to match DOUBLE in database
-    market       = sa.Column(sa.String(100))  
-    sector       = sa.Column(sa.String(100))  
-    industry     = sa.Column(sa.String(100))  
-    earnings_release_trading_date_fq      = sa.Column(sa.String(50))  
-    earnings_release_next_trading_date_fq = sa.Column(sa.String(50))  
+    symbol       = sa.Column(sa.String(255), unique=True, nullable=False)
+    company_name = sa.Column(sa.String(255))
+    price        = sa.Column(mysql.DECIMAL(precision=15, scale=4))  # Changed to match production
+    change       = sa.Column(mysql.DECIMAL(precision=15, scale=4), key='change')  # Changed to match production
+    volume       = sa.Column(sa.BigInteger)  # Changed from Float to BigInteger
+    market_cap   = sa.Column(mysql.DECIMAL(precision=25, scale=4))  # Updated to DECIMAL(25,4)
+    market       = sa.Column(sa.String(255))  # Changed from String(100) to String(255)
+    sector       = sa.Column(sa.String(255))  # Changed from String(100) to String(255)
+    industry     = sa.Column(sa.String(255))  # Changed from String(100) to String(255)
+    earnings_release_trading_date_fq      = sa.Column(sa.DateTime)  # Changed from String(50) to DateTime
+    earnings_release_next_trading_date_fq = sa.Column(sa.DateTime)  # Changed from String(50) to DateTime
     indexes      = sa.Column(sa.Text)
-    country      = sa.Column(sa.String(50))  
-    exchange     = sa.Column(sa.String(50))  
+    country      = sa.Column(sa.String(255))  # Changed from String(50) to String(255)
+    exchange     = sa.Column(sa.String(255))  # Changed from String(50) to String(255)
     updated_at   = sa.Column(mysql.TIMESTAMP, server_default=sa.func.now(), onupdate=sa.func.now())
 
     # Adding relationship for yf_daily_bar
