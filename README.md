@@ -6,8 +6,8 @@ This project provides utilities for managing MySQL database connections and oper
 ## aws connection 
 
 #### Private Key Permissions on Windows
-icacls "C:....\quantlab-web.pem" /inheritance:r
-icacls "C:....\quantlab-web.pem" /grant:r "%USERNAME%:R"
+icacls "C:\src\dev\gb\quantlabs-market-data-sync\aws-key\quantlab-web.pem" /inheritance:r
+icacls "C:\src\dev\gb\quantlabs-market-data-sync\aws-key\quantlab-web.pem" /grant:r "%USERNAME%:R"
 
 #### Git Bash & mac linux dist
 chmod 600 .../quantlab-web.pem
