@@ -118,5 +118,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Remove unique constraints and indexes from financial statement tables."""
     pass

@@ -146,6 +146,7 @@ class IShareETFHolding(Base):
     ishare_etf       = relationship('IShareETF', back_populates='holdings')
     
     __table_args__ = (
+        sa.UniqueConstraint('ishare_etf_id', 'ticker', name='uix_ishare_etf_holding_etf_ticker'),
         sa.Index('ishare_etf_holding_ishare_etf_id_foreign', 'ishare_etf_id'),
     )
     
@@ -363,6 +364,10 @@ class Executive(Base):
     # Relationships
     company         = relationship("Company", back_populates="executives")
     
+    __table_args__ = (
+        sa.UniqueConstraint('company_symbol', 'name', name='uix_executive_company_name'),
+    )
+
     def __repr__(self):
         return f"Executive(name='{self.name}', company_symbol='{self.company_symbol}', title='{self.title}')"
 
