@@ -1,15 +1,28 @@
 #!/bin/bash
+# filepath: /home/ubuntu/quantlabs-market-data-sync/run_etf_list_with_holdings.sh
 # Default environment is dev, can be overridden by command-line parameter
 ENV=${1:-dev}
 
+# Add absolute path configuration
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
 
+# Activate the virtual environment
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Log Python path information for debugging
+echo "Using Python: $(which python)" >> "$SCRIPT_DIR/python_path.log"
+echo "Python version: $(python --version 2>&1)" >> "$SCRIPT_DIR/python_path.log"
+
+# Bot configuration
 BOT_TOKEN="8167802418:AAGlSOFaSYtYueGV0RdAu9AXwNqZDr7XFQQ"
 CHAT_ID="1349714573"
 
-mkdir -p execution_log
+# Create logs directory
+mkdir -p "$SCRIPT_DIR/execution_log"
 
 EXECUTION_DATE=$(date "+%Y%m%d_%H%M%S")
-LOG_FILE="execution_log/scripts_run_${EXECUTION_DATE}.log"
+LOG_FILE="$SCRIPT_DIR/execution_log/scripts_run_${EXECUTION_DATE}.log"
 
 format_duration() {
     local seconds=$1
@@ -30,8 +43,8 @@ run_script() {
     
     echo "[$start_time_str] Starting: $script_cmd --env $ENV" | tee -a "$LOG_FILE"
     
-    # Execute the script
-    $script_cmd --env $ENV
+    # Execute the script with the full python path using eval
+    eval "$script_cmd --env $ENV"
     exit_code=$?
     
     # Log end time and calculate duration
@@ -76,8 +89,8 @@ echo "===================================================================" | tee
 
 # Array of scripts to run in sequence
 scripts=(
-    "python scripts/etf/holdings_ishare_etf_list.py"
-    "python scripts/etf/holdings_ishare_etf_update.py"
+    "python $SCRIPT_DIR/scripts/etf/holdings_ishare_etf_list.py"
+    "python $SCRIPT_DIR/scripts/etf/holdings_ishare_etf_update.py"
 )
 
 # Run each script in sequence

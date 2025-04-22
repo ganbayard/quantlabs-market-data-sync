@@ -1,15 +1,27 @@
 #!/bin/bash
+# filepath: /home/ubuntu/quantlabs-market-data-sync/run_mmtv_bars_and_tech_indicators.sh
 # Default environment is dev, can be overridden by command-line parameter
 ENV=${1:-dev}
 
+# Add absolute path configuration
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
+# Activate the virtual environment
+source "$SCRIPT_DIR/venv/bin/activate"
+
+# Log Python path information for debugging
+echo "Using Python: $(which python)" >> "$SCRIPT_DIR/python_path.log"
+echo "Python version: $(python --version 2>&1)" >> "$SCRIPT_DIR/python_path.log"
 
 BOT_TOKEN="8167802418:AAGlSOFaSYtYueGV0RdAu9AXwNqZDr7XFQQ"
 CHAT_ID="1349714573"
 
-mkdir -p execution_log
+# Create logs directory
+mkdir -p "$SCRIPT_DIR/execution_log"
 
 EXECUTION_DATE=$(date "+%Y%m%d_%H%M%S")
-LOG_FILE="execution_log/scripts_run_${EXECUTION_DATE}.log"
+LOG_FILE="$SCRIPT_DIR/execution_log/scripts_run_${EXECUTION_DATE}.log"
 
 format_duration() {
     local seconds=$1
@@ -30,8 +42,8 @@ run_script() {
     
     echo "[$start_time_str] Starting: $script_cmd --env $ENV" | tee -a "$LOG_FILE"
     
-    # Execute the script
-    $script_cmd --env $ENV
+    # Execute the script with eval to handle arguments properly
+    eval "$script_cmd --env $ENV"
     exit_code=$?
     
     # Log end time and calculate duration
@@ -76,16 +88,8 @@ echo "===================================================================" | tee
 
 # Array of scripts to run in sequence
 scripts=(
-    "python scripts/general_info/symbol_fields_update.py"
-    "python scripts/etf/holdings_ishare_etf_list.py"
-    "python scripts/etf/holdings_ishare_etf_update.py"
-    "python scripts/general_info/yf_daily_bar_loader.py --period last_day --workers 1"
-    "python scripts/equity2user/equity_technical_indicators.py --period last_day --workers 1"
-    "python scripts/sector_rotation/market_breadth_mmtv_update.py --last_day --num_processes 1"
-    "python scripts/financial_details/news_collector.py --days 30 --workers 1"
-    "python scripts/general_info/company_profile_yfinance.py"
-    "python scripts/financial_details/company_financials_yfinance.py --workers 1"
-    "python scripts/equity2user/equity2user_history.py --period last_day --workers 1"
+    "python $SCRIPT_DIR/scripts/equity2user/equity_technical_indicators.py --period last_week --workers 1"
+    "python $SCRIPT_DIR/scripts/sector_rotation/market_breadth_mmtv_update.py --last_day --num_processes 1"
 )
 
 # Run each script in sequence

@@ -1,5 +1,5 @@
 #!/bin/bash
-# filepath: /home/ubuntu/quantlabs-market-data-sync/run_financial_details.sh
+# filepath: /home/ubuntu/quantlabs-market-data-sync/run_mmtv_bars_and_tech_indicators.sh
 # Default environment is dev, can be overridden by command-line parameter
 ENV=${1:-dev}
 
@@ -88,8 +88,7 @@ echo "===================================================================" | tee
 
 # Array of scripts to run in sequence
 scripts=(
-    "python $SCRIPT_DIR/scripts/general_info/company_profile_yfinance.py"
-    "python $SCRIPT_DIR/scripts/financial_details/company_financials_yfinance.py --workers 1"
+    "python $SCRIPT_DIR/scripts/financial_details/news_collector.py --days 30 --workers 1"
 )
 
 # Run each script in sequence
