@@ -182,3 +182,14 @@ The script uses different database connections based on the `--env` parameter:
 - **dev**: Uses local Docker database specified by `LOCAL_DB_*` variables in `.env`
 - **prod**: Uses production database specified by `DB_*` variables in `.env`
 
+## Scripts commands  
+
+## yf daily bar
+
+### Force specific time period but still use smart update
+python scripts/general_info/yf_daily_bar_loader.py --period last_week --workers 1
+
+### Disable smart update and use fixed periods
+python scripts/general_info/yf_daily_bar_loader.py --period last_day --no-smart-update --workers 1
+
+
