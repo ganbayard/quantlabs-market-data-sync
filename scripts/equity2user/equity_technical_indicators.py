@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, date
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+from sqlalchemy import func, distinct
 
 # Add project root to Python path
 script_dir = Path(__file__).parent
@@ -30,13 +31,16 @@ BATCH_SIZE = 100
 MIN_DELAY = 0.5
 MAX_DELAY = 1.5
 MAX_RETRIES = 2
+DEFAULT_SAFETY_DAYS = 3  # Days to look back when using latest timestamp (to catch any missed days)
 
 # Period constants (in days)
 PERIOD_DAY = 3  # 3 days to account for weekends
+PERIOD_WEEK = 9  # 9 days to account for weekends and holidays
 PERIOD_MONTH = 30
 PERIOD_YEAR = 365
 PERIOD_FIVE_YEAR = 1825
-DEFAULT_PERIOD = PERIOD_DAY 
+DEFAULT_PERIOD = PERIOD_DAY
+
 
 # Base directory setup
 BASE_DIR = Path(__file__).parent
@@ -68,22 +72,110 @@ class Stats:
     def __init__(self, total_symbols):
         self.processed = 0
         self.successful = 0
+        self.indicators_added = 0
+        self.indicators_updated = 0
+        self.failed = 0
+        self.skipped = 0
         self.lock = threading.Lock()
         self.total_symbols = total_symbols
         self.start_time = datetime.now()
     
-    def increment(self, attribute):
+    def increment(self, attribute, value=1):
         with self.lock:
-            setattr(self, attribute, getattr(self, attribute) + 1)
+            setattr(self, attribute, getattr(self, attribute) + value)
             if attribute == 'processed' and self.processed % 10 == 0:
+                elapsed = (datetime.now() - self.start_time).total_seconds() / 60
+                symbols_per_minute = self.processed / elapsed if elapsed > 0 else 0
+                remaining = (self.total_symbols - self.processed) / symbols_per_minute if symbols_per_minute > 0 else 0
+                
+                logger.info(f"Rate: {symbols_per_minute:.1f} symbols/min, Est. remaining: {remaining:.1f} minutes")
                 logger.info(f"Progress: {self.processed}/{self.total_symbols} ({(self.processed/self.total_symbols)*100:.1f}%)")
-                logger.info(f"Successful: {self.successful}")
+                logger.info(f"Indicators added: {self.indicators_added}, updated: {self.indicators_updated}, failed: {self.failed}")
 
 def get_thread_session():
     """Get or create a thread-local database session"""
     if not hasattr(thread_local, "session"):
         thread_local.session = Session()
     return thread_local.session
+
+def get_latest_date(symbol=None, session=None):
+    """
+    Get the latest date in the database for a symbol or all symbols
+    
+    Args:
+        symbol: Symbol to check (if None, check all symbols)
+        session: SQLAlchemy session to use (if None, create a new one)
+    
+    Returns:
+        date or None: Latest date in the database
+    """
+    if session is None:
+        session = get_thread_session()
+    
+    try:
+        query = session.query(func.max(EquityTechnicalIndicator.date))
+        if symbol:
+            query = query.filter(EquityTechnicalIndicator.symbol == symbol)
+        
+        latest = query.scalar()
+        return latest
+    except Exception as e:
+        logger.error(f"Error getting latest date: {e}")
+        return None
+
+def get_date_range(period=None, start_date=None, symbol=None, smart_update=True):
+    """
+    Get date range based on period, start date, or latest timestamp in database
+    
+    Args:
+        period: Predefined time period (last_day, last_week, etc.)
+        start_date: Explicit start date (overrides period)
+        symbol: Symbol to check for latest timestamp
+        smart_update: Whether to use the latest date in database as reference
+    
+    Returns:
+        tuple: (start_date, end_date)
+    """
+    end_date = datetime.now().date()
+    
+    # Case 1: Explicit start date provided
+    if start_date:
+        if isinstance(start_date, str):
+            try:
+                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            except ValueError:
+                logger.error(f"Invalid start date format: {start_date}. Using default.")
+                start_date = datetime.now().date() - timedelta(days=PERIOD_YEAR)
+        return start_date, end_date
+    
+    # Case 2: Smart update enabled - check database for latest date
+    if smart_update:
+        latest_date = get_latest_date(symbol)
+        if latest_date:
+            if isinstance(latest_date, datetime):
+                latest_date = latest_date.date()
+                
+            # Use latest date minus safety days to catch any missed days
+            smart_start_date = latest_date - timedelta(days=DEFAULT_SAFETY_DAYS)
+            logger.info(f"Using latest date from database: {latest_date} (minus {DEFAULT_SAFETY_DAYS} safety days)")
+            return smart_start_date, end_date
+    
+    # Case 3: Use predefined period
+    if period == 'last_day':
+        start_date = end_date - timedelta(days=PERIOD_DAY)
+    elif period == 'last_week':
+        start_date = end_date - timedelta(days=PERIOD_WEEK)
+    elif period == 'last_month':
+        start_date = end_date - timedelta(days=PERIOD_MONTH)
+    elif period == 'last_year':
+        start_date = end_date - timedelta(days=PERIOD_YEAR)
+    elif period == '5_year':
+        start_date = end_date - timedelta(days=PERIOD_FIVE_YEAR)
+    else:
+        logger.warning(f"Invalid period '{period}', using default of 1 day")
+        start_date = end_date - timedelta(days=PERIOD_DAY)
+    
+    return start_date, end_date
 
 def money_flow_index(high, low, close, volume, length=14): 
     """Calculate Money Flow Index (MFI)"""
@@ -107,6 +199,9 @@ def process_stock_data(symbol, historical_data):
     """Process historical stock data and store in database"""
     session = get_thread_session()
     thread_name = threading.current_thread().name
+    added = 0
+    updated = 0
+    skipped = 0
     
     try:
         # Process each day's data
@@ -125,6 +220,7 @@ def process_stock_data(symbol, historical_data):
                 existing.trend_intensity = day_data['trend_intensity']
                 existing.persistent_ratio = day_data['persistent_ratio']
                 existing.updated_at = datetime.now()
+                updated += 1
             else:
                 # Create new record
                 new_record = EquityTechnicalIndicator(
@@ -132,165 +228,216 @@ def process_stock_data(symbol, historical_data):
                     date=day_date,
                     mfi=day_data['mfi'],
                     trend_intensity=day_data['trend_intensity'],
-                    persistent_ratio=day_data['persistent_ratio']
+                    persistent_ratio=day_data['persistent_ratio'],
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
                 )
                 session.add(new_record)
-        
-        # Commit all changes
-        session.commit()
-        stats.increment('successful')
-        logger.info(f"[{thread_name}] Successfully processed {symbol} with {len(historical_data)} data points")
-        return True
+                added += 1
+
+            # Commit in batches to avoid large transactions
+            if (added + updated) % 50 == 0:
+                try:
+                    session.commit()
+                except Exception as e:
+                    logger.error(f"Error committing batch for {symbol}: {e}")
+                    session.rollback()
+                    skipped += (added + updated) % 50
+                    
+        # Final commit for any remaining records
+        try:
+            session.commit()
+            stats.increment('indicators_added', added)
+            stats.increment('indicators_updated', updated)
+            stats.increment('skipped', skipped)
+            stats.increment('successful')
+            logger.info(f"[{thread_name}] Successfully processed {symbol}: {added} added, {updated} updated, {skipped} skipped")
+            return True
+        except Exception as e:
+            logger.error(f"Error in final commit for {symbol}: {e}")
+            session.rollback()
+            stats.increment('failed')
+            return False
         
     except Exception as e:
         logger.error(f"[{thread_name}] Error processing {symbol}: {str(e)}")
         session.rollback()
+        stats.increment('failed')
         return False
 
-def process_symbols(symbols, historical_data_dict):
+def process_symbols(symbols, start_date, end_date, smart_update=True):
     """Process a batch of symbols"""
     thread_name = threading.current_thread().name
     logger.info(f"[{thread_name}] Starting processing of {len(symbols)} symbols")
     
     for symbol in symbols:
-        if symbol in historical_data_dict:
-            process_stock_data(symbol, historical_data_dict[symbol])
-        else:
-            logger.warning(f"[{thread_name}] No data found for symbol {symbol}")
-        
-        stats.increment('processed')
-        # Random delay between symbols
-        delay = random.uniform(MIN_DELAY, MAX_DELAY)
-        time.sleep(delay)
+        try:
+            # For smart updates, get symbol-specific start_date
+            if smart_update:
+                symbol_start_date, symbol_end_date = get_date_range(
+                    start_date=None, 
+                    symbol=symbol,
+                    smart_update=True
+                )
+            else:
+                symbol_start_date, symbol_end_date = start_date, end_date
+            
+            # Calculate technical indicators from price data
+            historical_data = calculate_historical_data_for_symbol(symbol, symbol_start_date, symbol_end_date)
+            
+            if historical_data:
+                process_stock_data(symbol, historical_data)
+            else:
+                logger.warning(f"No data found for symbol {symbol}")
+                stats.increment('skipped')
+                
+        except Exception as e:
+            logger.error(f"Unexpected error processing {symbol}: {str(e)}")
+            stats.increment('failed')
+        finally:
+            stats.increment('processed')
+            # Random delay between symbols
+            delay = random.uniform(MIN_DELAY, MAX_DELAY)
+            time.sleep(delay)
     
     logger.info(f"[{thread_name}] Completed batch processing")
 
-def calculate_historical_data(symbols, days=60):
+def calculate_historical_data_for_symbol(symbol, start_date, end_date):
     """
-    Calculate real technical indicators from historical price data in the database
+    Calculate technical indicators from historical price data for a specific symbol and date range
     """
     session = get_thread_session()
-    historical_data = {}
-    cutoff_date = date.today() - timedelta(days=days)
     
-    logger.info(f"Fetching price data from yf_daily_bar for {len(symbols)} symbols...")
-    
-    # Process each symbol
-    for symbol in symbols:
-        try:
-            # Query OHLC data from yf_daily_bar table
-            bars = session.query(YfBar1d).filter(
-                YfBar1d.symbol == symbol,
-                YfBar1d.timestamp >= cutoff_date
-            ).order_by(YfBar1d.timestamp.asc()).all()
+    try:
+        # Query OHLC data from yf_daily_bar table for the specific date range
+        bars = session.query(YfBar1d).filter(
+            YfBar1d.symbol == symbol,
+            YfBar1d.timestamp >= start_date,
+            YfBar1d.timestamp <= end_date
+        ).order_by(YfBar1d.timestamp.asc()).all()
+        
+        if not bars:
+            logger.warning(f"No price data found for {symbol} between {start_date} and {end_date}")
+            return []
             
-            if not bars:
-                logger.warning(f"No price data found for {symbol}, skipping")
+        # Get additional historical data for accurate calculations (lookback window)
+        lookback = 65  # Maximum lookback needed for calculations (trend intensity uses 65-day MA)
+        lookback_date = start_date - timedelta(days=lookback * 2)  # Double to account for weekends/holidays
+        
+        lookback_bars = session.query(YfBar1d).filter(
+            YfBar1d.symbol == symbol,
+            YfBar1d.timestamp >= lookback_date,
+            YfBar1d.timestamp < start_date
+        ).order_by(YfBar1d.timestamp.asc()).all()
+        
+        # Combine lookback and target period data
+        all_bars = lookback_bars + bars
+        
+        if len(all_bars) < lookback:
+            logger.warning(f"Insufficient data for {symbol} to calculate indicators (need at least {lookback} days, got {len(all_bars)})")
+            return []
+            
+        # Convert to pandas DataFrame for easier calculation
+        data = pd.DataFrame([
+            {
+                'date': bar.timestamp.date(),
+                'open': float(bar.open),
+                'high': float(bar.high),
+                'low': float(bar.low),
+                'close': float(bar.close),
+                'volume': int(bar.volume)
+            } for bar in all_bars
+        ])
+        
+        # Calculate technical indicators
+        
+        # 1. Money Flow Index
+        try:
+            mfi_values = money_flow_index(data['high'], data['low'], data['close'], data['volume'])
+            data['mfi'] = mfi_values
+        except Exception as e:
+            logger.error(f"Error calculating MFI for {symbol}: {e}")
+            data['mfi'] = np.nan
+        
+        # 2. Trend Intensity
+        try:
+            data['trend_intensity'] = trend_intensity_calc(data['close'])
+        except Exception as e:
+            logger.error(f"Error calculating trend intensity for {symbol}: {e}")
+            data['trend_intensity'] = np.nan
+        
+        # 3. Persistence Ratio (measures consistency of price movements)
+        try:
+            # Calculate daily returns
+            data['return'] = data['close'].pct_change()
+            
+            # Calculate 14-day cumulative return
+            data['cum_return_14d'] = data['return'].rolling(window=14).sum()
+            
+            # Calculate persistence ratio (absolute cumulative return / sum of absolute daily returns)
+            abs_cum_return = data['cum_return_14d'].abs()
+            sum_abs_returns = data['return'].abs().rolling(window=14).sum()
+            
+            # Avoid division by zero
+            data['persistent_ratio'] = np.where(
+                sum_abs_returns > 0,
+                abs_cum_return / sum_abs_returns,
+                1.0  # Default value when denominator is zero
+            )
+        except Exception as e:
+            logger.error(f"Error calculating persistence ratio for {symbol}: {e}")
+            data['persistent_ratio'] = np.nan
+        
+        # Filter to only include data for the requested date range
+        target_data = data[data['date'] >= start_date]
+        
+        # Convert to list of dictionaries with only the needed fields
+        symbol_data = []
+        for _, row in target_data.iterrows():
+            # Skip days with missing indicators
+            if pd.isna(row['mfi']) or pd.isna(row['trend_intensity']) or pd.isna(row['persistent_ratio']):
                 continue
                 
-            # Convert to pandas DataFrame for easier calculation
-            data = pd.DataFrame([
-                {
-                    'date': bar.timestamp.date(),
-                    'open': bar.open,
-                    'high': bar.high,
-                    'low': bar.low,
-                    'close': bar.close,
-                    'volume': bar.volume
-                } for bar in bars
-            ])
+            day_data = {
+                'date': row['date'],
+                'mfi': float(row['mfi']),
+                'trend_intensity': float(row['trend_intensity']),
+                'persistent_ratio': float(row['persistent_ratio'])
+            }
+            symbol_data.append(day_data)
+        
+        if not symbol_data:
+            logger.warning(f"No valid technical indicators calculated for {symbol}")
             
-            # Calculate technical indicators
-            
-            # 1. Money Flow Index
-            try:
-                mfi_values = money_flow_index(data['high'], data['low'], data['close'], data['volume'])
-                data['mfi'] = mfi_values
-            except Exception as e:
-                logger.error(f"Error calculating MFI for {symbol}: {e}")
-                data['mfi'] = np.nan
-            
-            # 2. Trend Intensity
-            try:
-                data['trend_intensity'] = trend_intensity_calc(data['close'])
-            except Exception as e:
-                logger.error(f"Error calculating trend intensity for {symbol}: {e}")
-                data['trend_intensity'] = np.nan
-            
-            # 3. Persistence Ratio (measures consistency of price movements)
-            try:
-                # Calculate daily returns
-                data['return'] = data['close'].pct_change()
-                
-                # Calculate 14-day cumulative return
-                data['cum_return_14d'] = data['return'].rolling(window=14).sum()
-                
-                # Calculate persistence ratio (absolute cumulative return / sum of absolute daily returns)
-                abs_cum_return = data['cum_return_14d'].abs()
-                sum_abs_returns = data['return'].abs().rolling(window=14).sum()
-                
-                # Avoid division by zero
-                data['persistent_ratio'] = np.where(
-                    sum_abs_returns > 0,
-                    abs_cum_return / sum_abs_returns,
-                    1.0  # Default value when denominator is zero
-                )
-            except Exception as e:
-                logger.error(f"Error calculating persistence ratio for {symbol}: {e}")
-                data['persistent_ratio'] = np.nan
-            
-            # Convert to list of dictionaries with only the needed fields
-            symbol_data = []
-            for _, row in data.iterrows():
-                # Skip days with missing indicators
-                if pd.isna(row['mfi']) or pd.isna(row['trend_intensity']) or pd.isna(row['persistent_ratio']):
-                    continue
-                    
-                day_data = {
-                    'date': row['date'],
-                    'mfi': float(row['mfi']),
-                    'trend_intensity': float(row['trend_intensity']),
-                    'persistent_ratio': float(row['persistent_ratio'])
-                }
-                symbol_data.append(day_data)
-            
-            if symbol_data:
-                historical_data[symbol] = symbol_data
-                
-        except Exception as e:
-            logger.error(f"Error processing historical data for {symbol}: {e}")
-    
-    return historical_data
+        return symbol_data
+        
+    except Exception as e:
+        logger.error(f"Error calculating historical data for {symbol}: {e}")
+        return []
 
-def get_technical_data(input_file_path=None, days=365):
-    """
-    Read symbols from input file and calculate technical indicators from real price data
-    """
-    # Use provided input file or default
-    if input_file_path:
-        input_file = Path(input_file_path)
-    else:
+def get_symbols(input_file=None):
+    """Get symbols from input file or use defaults"""
+    # Default symbol file location
+    if not input_file:
         input_file = DEFAULT_INPUT_FILE
     
     logger.info(f"Reading symbols from {input_file}")
     try:
         with open(input_file, 'r') as f:
-            content = f.read()
+            content = f.read().strip()
             symbols = [symbol.strip() for symbol in content.split(',') if symbol.strip()]
-            logger.info(f"Found {len(symbols)} symbols in input file")
-    except FileNotFoundError:
-        logger.error(f"Input file not found: {input_file}")
-        # Fallback to a smaller set of symbols if file not found
-        logger.warning("Using fallback symbol list")
-        symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA", "NVDA", "JPM", "BAC", "WMT"]
-    
-    logger.info(f"Calculating technical indicators for {days} days of price data...")
-    
-    # Calculate indicators using real price data
-    historical_data = calculate_historical_data(symbols, days)
-    
-    logger.info(f"Generated technical indicators for {len(historical_data)} symbols")
-    return historical_data, symbols
+        
+        if not symbols:
+            raise ValueError("No symbols found in input file")
+            
+        logger.info(f"Found {len(symbols)} symbols in input file")
+        return symbols
+    except Exception as e:
+        logger.error(f"Error reading symbol file: {e}")
+        # Return some default symbols if file can't be read
+        default_symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "META", "TSLA"]
+        logger.warning(f"Using default symbols: {', '.join(default_symbols)}")
+        return default_symbols
 
 def clean_old_data(history_days):
     """Remove data older than history_days to maintain database size"""
@@ -314,147 +461,188 @@ def clean_old_data(history_days):
         logger.error(f"Error cleaning old data: {str(e)}")
         session.rollback()
 
-def analyze_historical_indicators(history_days=365):
-    """Analyze the historical technical indicators in the database"""
-    from sqlalchemy import func
-    
+def analyze_technical_indicators():
+    """Analyze and log stats about technical indicator data in the database"""
     session = Session()
-    
     try:
-        today = date.today()
-        analysis_period = today - timedelta(days=min(history_days, 30))  # Analyze at most 30 days 
+        # Get basic counts
+        total_indicators = session.query(EquityTechnicalIndicator).count()
+        total_symbols = session.query(EquityTechnicalIndicator.symbol).distinct().count()
         
-        # Count total records
-        total_symbols = session.query(func.count(func.distinct(EquityTechnicalIndicator.symbol))).scalar()
-        total_records = session.query(EquityTechnicalIndicator).count()
+        logger.info("\nTechnical Indicator Database Statistics:")
+        logger.info(f"Total indicators stored: {total_indicators:,}")
+        logger.info(f"Total symbols: {total_symbols}")
         
-        logger.info("\nHistorical Technical Indicator Analysis:")
-        logger.info(f"Total symbols tracked: {total_symbols}")
-        logger.info(f"Total data points: {total_records}")
-        
-        # Calculate average records per symbol
         if total_symbols > 0:
-            avg_records = total_records / total_symbols
-            logger.info(f"Average data points per symbol: {avg_records:.1f}")
+            indicators_per_symbol = total_indicators / total_symbols
+            logger.info(f"Average indicators per symbol: {indicators_per_symbol:.1f}")
         
-        # Calculate average MFI, trend intensity, and persistence ratio for the last month
-        recent_avg_mfi = session.query(func.avg(EquityTechnicalIndicator.mfi)).filter(
-            EquityTechnicalIndicator.date >= analysis_period
-        ).scalar()
+        # Get date range
+        oldest_indicator = session.query(EquityTechnicalIndicator).order_by(EquityTechnicalIndicator.date.asc()).first()
+        newest_indicator = session.query(EquityTechnicalIndicator).order_by(EquityTechnicalIndicator.date.desc()).first()
         
-        recent_avg_trend = session.query(func.avg(EquityTechnicalIndicator.trend_intensity)).filter(
-            EquityTechnicalIndicator.date >= analysis_period
-        ).scalar()
+        if oldest_indicator and newest_indicator:
+            days_span = (newest_indicator.date - oldest_indicator.date).days if isinstance(newest_indicator.date, date) else 0
+            logger.info(f"Date range: {oldest_indicator.date} to {newest_indicator.date} ({days_span} days)")
         
-        recent_avg_persistence = session.query(func.avg(EquityTechnicalIndicator.persistent_ratio)).filter(
-            EquityTechnicalIndicator.date >= analysis_period
-        ).scalar()
+        # Get symbols with most and least data
+        symbol_counts = session.query(
+            EquityTechnicalIndicator.symbol, 
+            func.count(EquityTechnicalIndicator.symbol).label('count')
+        ).group_by(EquityTechnicalIndicator.symbol).order_by(func.count(EquityTechnicalIndicator.symbol).desc()).all()
         
-        logger.info("\nLast Month Average Values:")
-        logger.info(f"Average MFI: {recent_avg_mfi:.2f}")
-        logger.info(f"Average Trend Intensity: {recent_avg_trend:.2f}")
-        logger.info(f"Average Persistence Ratio: {recent_avg_persistence:.2f}")
+        if symbol_counts:
+            most_data = symbol_counts[0]
+            least_data = symbol_counts[-1]
+            logger.info(f"Symbol with most indicators: {most_data[0]} ({most_data[1]} indicators)")
+            logger.info(f"Symbol with least indicators: {least_data[0]} ({least_data[1]} indicators)")
+        
+        # Get recent activity
+        today = datetime.now().date()
+        yesterday = today - timedelta(days=1)
+        
+        indicators_today = session.query(EquityTechnicalIndicator).filter(EquityTechnicalIndicator.date == today).count()
+        indicators_yesterday = session.query(EquityTechnicalIndicator).filter(EquityTechnicalIndicator.date == yesterday).count()
+        
+        logger.info(f"Indicators for today: {indicators_today}")
+        logger.info(f"Indicators for yesterday: {indicators_yesterday}")
         
     except Exception as e:
-        logger.error(f"Error analyzing technical indicators: {str(e)}")
+        logger.error(f"Error analyzing database statistics: {e}")
     finally:
         session.close()
 
 # Initialize global variables
 engine = None
 Session = None
+stats = None
 
 def main():
     # Set up argument parser
     parser = argparse.ArgumentParser(description='Historical Technical Indicators Processor')
     parser = add_environment_args(parser)
     parser.add_argument('--period', type=str, 
-                      choices=['last_day', 'last_month', 'last_year', '5_year'],
-                      default='last_year',
-                      help='Period for historical data (default: last_year)')
+                  choices=['last_day', 'last_week', 'last_month', 'last_year', '5_year'],
+                  default='last_day',
+                  help='Period for historical data (default: last_day)')
     parser.add_argument('--workers', type=int, default=NUM_WORKERS,
                       help=f'Number of worker threads (default: {NUM_WORKERS})')
     parser.add_argument('--input', type=str,
                       help=f'Input file with comma-separated symbols (default: {DEFAULT_INPUT_FILE})')
+    parser.add_argument('--no-smart-update', action='store_true',
+                      help='Disable smart update (ignore database last date)')
+    parser.add_argument('--stats-only', action='store_true',
+                      help='Only show database statistics, do not update data')
+    parser.add_argument('--start-date', type=str,
+                      help='Custom start date in YYYY-MM-DD format')
+    parser.add_argument('--symbol', type=str,
+                      help='Process a single symbol')
     parser.add_argument('--verbose', '-v', action='store_true',
                       help='Enable verbose logging')
     
     args = parser.parse_args()
     
-    # More explicit environment handling with detailed logging
-    if '--env prod' in sys.argv or '-e prod' in sys.argv:
-        logger.warning("PRODUCTION environment specified in command line arguments!")
-        args.env = 'prod'
-    else:
-        # Force to dev environment unless explicitly requested
-        args.env = 'dev'
-        logger.info("Using DEVELOPMENT environment (default)")
-    
-    # Setup database connection based on environment - MUST COME BEFORE ANY DB OPERATIONS
+    # Setup database connection based on environment
     global engine, Session, stats
-    logger.info(f"Connecting to database using environment: {args.env}")
-    engine = get_database_engine(args.env)
-    Session = get_session_maker(args.env)
+    env = getattr(args, 'env', 'dev')
+    engine = get_database_engine(env)
+    Session = get_session_maker(env)
     
-    # Set history days based on period argument
-    if args.period == 'last_day':
-        history_days = PERIOD_DAY
-    elif args.period == 'last_month':
-        history_days = PERIOD_MONTH
-    elif args.period == 'last_year':
-        history_days = PERIOD_YEAR
-    elif args.period == '5_year':
-        history_days = PERIOD_FIVE_YEAR
+    env_name = "PRODUCTION" if env == "prod" else "DEVELOPMENT"
+    logger.info(f"Starting technical indicators with {env_name} database")
+    
+    # Show stats only if requested
+    if args.stats_only:
+        analyze_technical_indicators()
+        return
+    
+    # Smart update setting
+    smart_update = not args.no_smart_update
+    
+    # Determine date range
+    if args.start_date:
+        start_date, end_date = get_date_range(start_date=args.start_date, smart_update=False)
+        logger.info(f"Using custom start date: {start_date}")
+    elif args.symbol and smart_update:
+        start_date, end_date = get_date_range(symbol=args.symbol.upper(), smart_update=True)
     else:
-        history_days = DEFAULT_PERIOD
+        start_date, end_date = get_date_range(period=args.period, smart_update=smart_update)
+        
+        if smart_update:
+            logger.info(f"Using smart update with start date: {start_date}")
+        else:
+            period_name = args.period or 'last_day'
+            logger.info(f"Using period of {period_name} ({start_date} to {end_date})")
     
-    env_name = "PRODUCTION" if args.env == "prod" else "DEVELOPMENT"
-    logger.info(f"Starting technical indicators history tracker using {env_name} database")
-    logger.info(f"Processing period: {args.period} ({history_days} days)")
+    # Get symbols to process
+    if args.symbol:
+        symbols = [args.symbol.upper()]
+        logger.info(f"Processing single symbol: {args.symbol}")
+    else:
+        symbols = get_symbols(args.input)
+    
+    # Initialize stats
+    stats = Stats(len(symbols))
     
     try:
-        # Clean old data first
-        clean_old_data(history_days)  # Use history_days instead of DEFAULT_PERIOD
-        
-        # Get historical technical indicator data
-        historical_data, symbols = get_technical_data(args.input, history_days)  # Pass the parameters!
-        
-        # Initialize global stats
-        global stats
-        stats = Stats(len(symbols))
-        
-        # Split symbols into batches for workers
-        batch_size = math.ceil(len(symbols) / NUM_WORKERS)
-        symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
-        
-        logger.info(f"Starting processing with {NUM_WORKERS} workers...")
-        logger.info(f"Total symbols to process: {len(symbols)}")
-        
-        with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
-            # Submit batches to thread pool
-            futures = [executor.submit(process_symbols, batch, historical_data) for batch in symbol_batches]
+        # Clean old data if needed
+        if args.period == '5_year':
+            clean_old_data(PERIOD_FIVE_YEAR)
+        elif args.period == 'last_year':
+            clean_old_data(PERIOD_YEAR)
             
-            # Wait for all futures to complete
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    logger.error(f"Error in worker thread: {str(e)}")
+        # Process symbols
+        if len(symbols) == 1 or args.workers == 1:
+            # Single symbol or single worker mode
+            process_symbols(symbols, start_date, end_date, smart_update)
+        else:
+            # Multi-symbol mode with threading
+            batch_size = math.ceil(len(symbols) / args.workers)
+            symbol_batches = [symbols[i:i + batch_size] for i in range(0, len(symbols), batch_size)]
+            
+            logger.info(f"Processing {len(symbols)} symbols with {args.workers} workers")
+            logger.info(f"Smart update: {'Yes' if smart_update else 'No'}")
+            
+            with ThreadPoolExecutor(max_workers=args.workers) as executor:
+                futures = [
+                    executor.submit(
+                        process_symbols, 
+                        batch, 
+                        start_date, 
+                        end_date, 
+                        smart_update
+                    ) 
+                    for batch in symbol_batches
+                ]
+                
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.error(f"Error in worker thread: {e}")
         
-        # Print final statistics
+        # Print summary
+        elapsed_time = (datetime.now() - stats.start_time).total_seconds() / 60
+        
         logger.info("\nProcessing Summary:")
-        logger.info(f"Total symbols processed: {stats.processed}")
+        logger.info(f"Total symbols processed: {stats.processed}/{len(symbols)}")
         logger.info(f"Successfully processed: {stats.successful}")
-        logger.info(f"Failed: {stats.processed - stats.successful}")
+        logger.info(f"Failed: {stats.failed}")
+        logger.info(f"Total indicators added: {stats.indicators_added}")
+        logger.info(f"Total indicators updated: {stats.indicators_updated}")
+        logger.info(f"Total processing time: {elapsed_time:.1f} minutes")
         
-        # Analyze the historical indicators
-        analyze_historical_indicators()
+        if elapsed_time > 0:
+            logger.info(f"Processing rate: {stats.processed/elapsed_time:.1f} symbols per minute")
+        
+        # Show database statistics
+        analyze_technical_indicators()
         
     except KeyboardInterrupt:
         logger.warning("\nProcess interrupted by user!")
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
-    
+        logger.error(f"Unexpected error: {e}")
+        
     logger.info("Processing completed")
 
 if __name__ == "__main__":
