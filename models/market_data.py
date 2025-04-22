@@ -198,7 +198,8 @@ class IncomeStatement(Base):
     # Timestamps - use TIMESTAMP to match production
     last_updated            = sa.Column(mysql.TIMESTAMP, server_onupdate=sa.func.current_timestamp())
     
-    __table_args__ = (
+    _table_args_ = (
+        sa.UniqueConstraint('symbol', 'date', 'period_type', name='uix_income_statement_key'),
         sa.Index('income_statements_symbol_index', 'symbol'),
     )
     
@@ -235,7 +236,8 @@ class BalanceSheet(Base):
     # Timestamps - use TIMESTAMP to match production
     last_updated            = sa.Column(mysql.TIMESTAMP, server_onupdate=sa.func.current_timestamp())
     
-    __table_args__ = (
+    _table_args_ = (
+        sa.UniqueConstraint('symbol', 'date', 'period_type', name='uix_balance_sheet_key'),
         sa.Index('balance_sheets_symbol_index', 'symbol'),
     )
     
@@ -268,7 +270,8 @@ class CashFlow(Base):
     # Timestamps - use TIMESTAMP to match production
     last_updated            = sa.Column(mysql.TIMESTAMP, server_onupdate=sa.func.current_timestamp())
     
-    __table_args__ = (
+    _table_args_ = (
+        sa.UniqueConstraint('symbol', 'date', 'period_type', name='uix_cash_flow_key'),
         sa.Index('cash_flows_symbol_index', 'symbol'),
     )
     
