@@ -12,3 +12,4 @@ etf-scraper
 norgatedata
 cachetools
 tqdm
+pymysql
