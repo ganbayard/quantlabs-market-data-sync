@@ -41,31 +41,26 @@ ADR_PERIOD = 20  # Days to use for ADR calculation
 MFI_PERIOD = 14  # Period for Money Flow Index
 TREND_PERIOD = 65  # Period for trend intensity calculation
 
-# Base directory setup
-BASE_DIR = Path(__file__).parent
-LOG_DIR = project_root / "logs"
+# Configure logging
+LOG_DIR = Path(__file__).parent.parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 log_file = LOG_DIR / f"equity_history_{datetime.now().strftime('%Y%m%d')}.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Standardized format
+    handlers=[
+        logging.FileHandler(log_file),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Define default input file path
 DEFAULT_INPUT_FILE = project_root / "scripts/symbols/stock_symbols.txt"
 
 # Thread-local storage
 thread_local = threading.local()
-
-def setup_logging():
-    """Setup logging configuration"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(threadName)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger(__name__)
-
-logger = setup_logging()
 
 class Stats:
     def __init__(self, total_symbols):
