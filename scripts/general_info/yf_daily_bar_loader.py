@@ -191,7 +191,32 @@ def get_data_loader(source):
         return YahooFinanceLoader()
 
 
-def process_symbol(symbol, start_date, end_date, data_source, force_update=False):
+def check_symbol_exists(symbol, session):
+    """Check if a symbol exists in the symbol_fields table"""
+    from models.market_data import SymbolFields
+    return session.query(SymbolFields).filter(SymbolFields.symbol == symbol).first() is not None
+
+
+def add_symbol_to_database(symbol, session):
+    """Add a missing symbol to the symbol_fields table with minimal info"""
+    from models.market_data import SymbolFields
+    try:
+        new_symbol = SymbolFields(
+            symbol=symbol,
+            company_name=f"Auto-added: {symbol}",
+            updated_at=datetime.now()
+        )
+        session.add(new_symbol)
+        session.commit()
+        logger.info(f"Added missing symbol {symbol} to symbol_fields table")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to add symbol {symbol} to database: {e}")
+        session.rollback()
+        return False
+
+
+def process_symbol(symbol, start_date, end_date, data_source, force_update=False, auto_add_symbols=True):
     """Process a single symbol's historical data"""
     session = get_thread_session()
     added = 0
@@ -199,6 +224,19 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
     skipped = 0
     
     try:
+        # First check if the symbol exists in the symbol_fields table
+        if not check_symbol_exists(symbol, session):
+            if auto_add_symbols:
+                logger.warning(f"Symbol {symbol} not found in database. Attempting to add it.")
+                if not add_symbol_to_database(symbol, session):
+                    logger.error(f"Skipping {symbol} as it could not be added to the database")
+                    stats.increment('failed')
+                    return 0, 0
+            else:
+                logger.warning(f"Skipping {symbol} as it doesn't exist in symbol_fields table")
+                stats.increment('failed')
+                return 0, 0
+                
         # Load data from source
         loader = get_data_loader(data_source)
         df = loader.load_symbol_data(symbol, start_date, end_date)
@@ -372,7 +410,8 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
     finally:
         stats.increment('processed')
 
-def process_symbol_batch(symbols, start_date, end_date, data_source, force_update, smart_update):
+
+def process_symbol_batch(symbols, start_date, end_date, data_source, force_update, smart_update, auto_add_symbols=False):
     """Process a batch of symbols"""
     thread_name = threading.current_thread().name
     logger.info(f"[{thread_name}] Starting batch processing of {len(symbols)} symbols")
@@ -389,7 +428,7 @@ def process_symbol_batch(symbols, start_date, end_date, data_source, force_updat
             else:
                 symbol_start_date, symbol_end_date = start_date, end_date
                 
-            process_symbol(symbol, symbol_start_date, symbol_end_date, data_source, force_update)
+            process_symbol(symbol, symbol_start_date, symbol_end_date, data_source, force_update, auto_add_symbols)
             
             # Add a small delay to avoid hammering the API
             time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
@@ -542,6 +581,8 @@ def main():
                         help='Only show database statistics, do not update data')
     parser.add_argument('--no-smart-update', action='store_true',
                         help='Disable smart update (ignore database last timestamp)')
+    parser.add_argument('--auto-add-symbols', action='store_true',
+                        help='Automatically add missing symbols to the database')
     
     args = parser.parse_args()
     
@@ -608,7 +649,7 @@ def main():
     # Process symbols
     if len(symbols) == 1:
         # Single symbol mode - no threading needed
-        process_symbol(symbols[0], start_date, end_date, args.source, args.force)
+        process_symbol(symbols[0], start_date, end_date, args.source, args.force, args.auto_add_symbols)
     else:
         # Multi-symbol mode with threading
         batch_size = math.ceil(len(symbols) / args.workers)
@@ -618,6 +659,7 @@ def main():
         logger.info(f"Data source: {args.source}")
         logger.info(f"Force update: {'Yes' if args.force else 'No'}")
         logger.info(f"Smart update: {'Yes' if smart_update else 'No'}")
+        logger.info(f"Auto-add symbols: {'Yes' if args.auto_add_symbols else 'No'}")
         
         try:
             with ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -629,7 +671,8 @@ def main():
                         end_date, 
                         args.source,
                         args.force,
-                        smart_update
+                        smart_update,
+                        args.auto_add_symbols
                     ) 
                     for batch in symbol_batches
                 ]
