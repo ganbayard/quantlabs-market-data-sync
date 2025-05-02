@@ -46,27 +46,38 @@ class SymbolFields(Base):
     __tablename__ = 'symbol_fields'
 
     id           = sa.Column(sa.Integer, primary_key=True)
-    symbol       = sa.Column(sa.String(255), unique=True, nullable=False)
-    company_name = sa.Column(sa.String(255))
-    price        = sa.Column(mysql.DECIMAL(precision=15, scale=4))  # Changed to match production
-    change       = sa.Column(mysql.DECIMAL(precision=15, scale=4), key='change')  # Changed to match production
-    volume       = sa.Column(sa.BigInteger)  # Changed from Float to BigInteger
-    market_cap   = sa.Column(mysql.DECIMAL(precision=25, scale=4))  # Updated to DECIMAL(25,4)
-    market       = sa.Column(sa.String(255))  # Changed from String(100) to String(255)
-    sector       = sa.Column(sa.String(255))  # Changed from String(100) to String(255)
-    industry     = sa.Column(sa.String(255))  # Changed from String(100) to String(255)
-    earnings_release_trading_date_fq      = sa.Column(sa.DateTime)  # Changed from String(50) to DateTime
-    earnings_release_next_trading_date_fq = sa.Column(sa.DateTime)  # Changed from String(50) to DateTime
-    indexes      = sa.Column(sa.Text)
-    country      = sa.Column(sa.String(255))  # Changed from String(50) to String(255)
-    exchange     = sa.Column(sa.String(255))  # Changed from String(50) to String(255)
+    symbol       = sa.Column(sa.String(255), unique=True, nullable=False, index=True)
+    is_etf       = sa.Column(sa.Boolean, default=False, nullable=False, index=True)
+    company_name = sa.Column(sa.String(255), nullable=True) # Fund name for ETFs
+    price        = sa.Column(mysql.DECIMAL(precision=15, scale=4), nullable=True)
+    change       = sa.Column(mysql.DECIMAL(precision=15, scale=4), key='change', nullable=True)
+    volume       = sa.Column(sa.BigInteger, nullable=True)
+    market       = sa.Column(sa.String(255), nullable=True)
+    country      = sa.Column(sa.String(255), nullable=True)
+    exchange     = sa.Column(sa.String(255), nullable=True)
     updated_at   = sa.Column(mysql.TIMESTAMP, server_default=sa.func.now(), onupdate=sa.func.now())
 
-    # Adding relationship for yf_daily_bar
+    # Stock specific fields (nullable)
+    market_cap   = sa.Column(mysql.DECIMAL(precision=25, scale=4), nullable=True)
+    sector       = sa.Column(sa.String(255), nullable=True)
+    industry     = sa.Column(sa.String(255), nullable=True)
+    earnings_release_trading_date_fq      = sa.Column(sa.DateTime, nullable=True)
+    earnings_release_next_trading_date_fq = sa.Column(sa.DateTime, nullable=True)
+    indexes      = sa.Column(sa.Text, nullable=True)
+
+    # ETF specific fields (nullable)
+    relative_volume     = sa.Column(sa.Float, nullable=True) # TradingView often uses float for relative values
+    aum                 = sa.Column(mysql.DECIMAL(precision=25, scale=4), nullable=True) # Kept in model, but API name is different/unknown
+    nav_total_return_3y = sa.Column(sa.Float, nullable=True) # Kept in model, but API name is different/unknown
+    expense_ratio       = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=True)
+    asset_class         = sa.Column(sa.String(255), nullable=True)
+    focus               = sa.Column(sa.String(255), nullable=True)
+
     daily_bars = relationship("YfBar1d", cascade="all, delete-orphan", passive_deletes=True)
 
     def __repr__(self):
-        return f"SymbolFields(symbol='{self.symbol}', sector='{self.sector}')"
+        asset_type = "ETF" if self.is_etf else "Stock"
+        return f"SymbolFields(symbol='{self.symbol}', type='{asset_type}', name='{self.company_name}')"
     
 
 ############################################################################################ Sector rotation data
@@ -289,7 +300,7 @@ class Equity2User(Base):
     risk_type               = sa.Column(sa.String(255), nullable=False)
     sector                  = sa.Column(sa.String(255))
     volume_spike            = sa.Column(sa.String(255), nullable=False)
-    RSI                     = sa.Column(mysql.DOUBLE, nullable=False)  # Using DOUBLE to match 'double' in production
+    RSI                     = sa.Column(mysql.DOUBLE, nullable=False) 
     ADR                     = sa.Column(mysql.DOUBLE, nullable=False)
     long_term_persistance   = sa.Column(mysql.DOUBLE, nullable=False)
     long_term_divergence    = sa.Column(mysql.DOUBLE, nullable=False)
@@ -300,12 +311,12 @@ class Equity2User(Base):
     rate_scoring            = sa.Column(mysql.DOUBLE, nullable=False)
     buy_point               = sa.Column(mysql.DOUBLE, nullable=False)
     short_point             = sa.Column(mysql.DOUBLE, nullable=False)
-    recommended_date        = sa.Column(mysql.TIMESTAMP, nullable=False)  # Changed to TIMESTAMP to match production
+    recommended_date        = sa.Column(mysql.TIMESTAMP, nullable=False) 
     is_active               = sa.Column(sa.Boolean, nullable=False)
     status                  = sa.Column(sa.String(20), nullable=False)
     overbuy_oversold        = sa.Column(mysql.DOUBLE, nullable=False)
-    created_at              = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
-    updated_at              = sa.Column(mysql.TIMESTAMP)  # Changed to TIMESTAMP to match production
+    created_at              = sa.Column(mysql.TIMESTAMP) 
+    updated_at              = sa.Column(mysql.TIMESTAMP) 
 
     def __repr__(self):
         return f"Equity2User(symbol='{self.symbol}', risk_type='{self.risk_type}', status='{self.status}')"
