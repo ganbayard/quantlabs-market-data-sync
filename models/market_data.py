@@ -409,3 +409,44 @@ class NewsArticle(Base):
     
     def __repr__(self):
         return f"NewsArticle(symbol='{self.symbol}', title='{self.title[:30]}...', date='{self.published_date}')"
+    
+
+
+class EtfStockRsBenchmark(Base):
+    __tablename__ = 'etf_stock_rs_benchmark'
+    
+    id                      = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    stock_symbol            = sa.Column(sa.String(255), nullable=False, index=True)
+    etf_symbol              = sa.Column(sa.String(255), nullable=False, index=True)
+    ishare_etf_id           = sa.Column(sa.BigInteger, sa.ForeignKey('ishare_etf.id', ondelete='SET NULL'), nullable=True)
+    market_value            = sa.Column(mysql.DECIMAL(precision=20, scale=2), nullable=True)
+    weight                  = sa.Column(mysql.DECIMAL(precision=10, scale=4), nullable=True)
+    
+    # Relative strength metrics
+    rs_current              = sa.Column(mysql.DOUBLE, nullable=True)
+    rs_mean_100d            = sa.Column(mysql.DOUBLE, nullable=True, index=True)
+    rs_mean_50d             = sa.Column(mysql.DOUBLE, nullable=True)
+    rs_mean_20d             = sa.Column(mysql.DOUBLE, nullable=True)
+    rs_mean_5d              = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    # Percentage of positive RS values
+    rs_pos_pct_100d         = sa.Column(mysql.DOUBLE, nullable=True)
+    rs_pos_pct_50d          = sa.Column(mysql.DOUBLE, nullable=True)
+    rs_pos_pct_20d          = sa.Column(mysql.DOUBLE, nullable=True)
+    rs_pos_pct_5d           = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    # Lists stored as JSON arrays in TEXT fields
+    rs_values_100d          = sa.Column(sa.Text, nullable=True)  # JSON array of values
+    rs_values_50d           = sa.Column(sa.Text, nullable=True)  # JSON array of values
+    rs_values_20d           = sa.Column(sa.Text, nullable=True)  # JSON array of values
+    rs_values_5d            = sa.Column(sa.Text, nullable=True)  # JSON array of values
+    
+    benchmark_symbol        = sa.Column(sa.String(10), nullable=False, server_default='SPY')
+    created_at              = sa.Column(mysql.TIMESTAMP, server_default=sa.func.now())
+    updated_at              = sa.Column(mysql.TIMESTAMP, server_default=sa.func.now(), onupdate=sa.func.now())
+    
+    # Relationship to ishare_etf table
+    ishare_etf              = relationship('IShareETF')
+    
+    def __repr__(self):
+        return f"EtfStockRsBenchmark(stock='{self.stock_symbol}', etf='{self.etf_symbol}', rs_mean_100d={self.rs_mean_100d})"
