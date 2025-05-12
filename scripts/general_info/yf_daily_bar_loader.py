@@ -29,9 +29,10 @@ from scripts.common_function import (
 )
 
 # Constants and Configuration
-NUM_WORKERS = 6
-MIN_DELAY = 0.2
-MAX_DELAY = 1.0
+NUM_WORKERS = 2  # Changed from 4 to 2
+BATCH_SIZE = 4   # Added batch size parameter for API requests
+MIN_DELAY = 0.5
+MAX_DELAY = 2.0
 DEFAULT_START_DATE = "2025-01-01" 
 DEFAULT_SOURCE = "yahoo"
 DEFAULT_SAFETY_DAYS = 3  # Days to look back when using latest timestamp (to catch any missed days)
@@ -180,15 +181,15 @@ def get_date_range(period=None, start_date=None, symbol=None, smart_update=True)
     return start_date, end_date
 
 
-def get_data_loader(source):
+def get_data_loader(source, batch_size=BATCH_SIZE):
     """Get the appropriate data loader based on source"""
     if source.lower() == 'norgate':
         return NorgateDataLoader()
     elif source.lower() == 'yahoo':
-        return YahooFinanceLoader()
+        return YahooFinanceLoader(batch_size=batch_size, worker_count=2)
     else:
         logger.warning(f"Unknown source '{source}', using Yahoo Finance")
-        return YahooFinanceLoader()
+        return YahooFinanceLoader(batch_size=batch_size, worker_count=2)
 
 
 def check_symbol_exists(symbol, session):
@@ -216,7 +217,7 @@ def add_symbol_to_database(symbol, session):
         return False
 
 
-def process_symbol(symbol, start_date, end_date, data_source, force_update=False, auto_add_symbols=True):
+def process_symbol(symbol, start_date, end_date, data_source, force_update=False, auto_add_symbols=True, batch_size=BATCH_SIZE):
     """Process a single symbol's historical data"""
     session = get_thread_session()
     added = 0
@@ -238,7 +239,7 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
                 return 0, 0
                 
         # Load data from source
-        loader = get_data_loader(data_source)
+        loader = get_data_loader(data_source, batch_size)
         df = loader.load_symbol_data(symbol, start_date, end_date)
         
         if df is None or df.empty:
@@ -411,7 +412,7 @@ def process_symbol(symbol, start_date, end_date, data_source, force_update=False
         stats.increment('processed')
 
 
-def process_symbol_batch(symbols, start_date, end_date, data_source, force_update, smart_update, auto_add_symbols=False):
+def process_symbol_batch(symbols, start_date, end_date, data_source, force_update, smart_update, auto_add_symbols=False, batch_size=BATCH_SIZE):
     """Process a batch of symbols"""
     thread_name = threading.current_thread().name
     logger.info(f"[{thread_name}] Starting batch processing of {len(symbols)} symbols")
@@ -428,7 +429,7 @@ def process_symbol_batch(symbols, start_date, end_date, data_source, force_updat
             else:
                 symbol_start_date, symbol_end_date = start_date, end_date
                 
-            process_symbol(symbol, symbol_start_date, symbol_end_date, data_source, force_update, auto_add_symbols)
+            process_symbol(symbol, symbol_start_date, symbol_end_date, data_source, force_update, auto_add_symbols, batch_size)
             
             # Add a small delay to avoid hammering the API
             time.sleep(random.uniform(MIN_DELAY, MAX_DELAY))
@@ -571,6 +572,8 @@ def main():
                         help=f'Data source to use (default: {DEFAULT_SOURCE})')
     parser.add_argument('--workers', type=int, default=NUM_WORKERS,
                         help=f'Number of worker threads (default: {NUM_WORKERS})')
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
+                        help=f'Batch size for API requests to avoid rate limiting (default: {BATCH_SIZE})')
     parser.add_argument('--input', type=str,
                         help='Input file with comma-separated symbols')
     parser.add_argument('--force', action='store_true',
@@ -672,7 +675,8 @@ def main():
                         args.source,
                         args.force,
                         smart_update,
-                        args.auto_add_symbols
+                        args.auto_add_symbols,
+                        args.batch_size
                     ) 
                     for batch in symbol_batches
                 ]

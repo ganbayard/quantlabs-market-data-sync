@@ -21,8 +21,8 @@ cache_lock = threading.Lock()
 
 class YahooFinanceLoader:
     """Yahoo Finance data loader implementation for price data"""
-    
-    def __init__(self, batch_size=5, worker_count=2):
+   
+    def __init__(self, batch_size=2, worker_count=2):
         """
         Yahoo Finance data loader with robust download handling
         
