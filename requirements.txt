@@ -20,3 +20,6 @@ plotly
 streamlit
 pytz
 python-dateutil
+
+tradingview-screener
+git+https://github.com/rongardF/tvdatafeed.git
