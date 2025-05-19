@@ -450,3 +450,56 @@ class EtfStockRsBenchmark(Base):
     
     def __repr__(self):
         return f"EtfStockRsBenchmark(stock='{self.stock_symbol}', etf='{self.etf_symbol}', rs_mean_100d={self.rs_mean_100d})"
+    
+
+class EquityRiskProfile(Base):
+    __tablename__ = 'equity_risk_profile'
+    
+    id               = sa.Column(sa.BigInteger, primary_key=True, autoincrement=True)
+    symbol           = sa.Column(sa.String(255), nullable=False, index=True)
+    is_etf           = sa.Column(sa.Boolean, default=False, nullable=False, index=True)
+    price            = sa.Column(mysql.DECIMAL(precision=15, scale=4), nullable=True)
+    risk_type        = sa.Column(sa.String(50), nullable=False, index=True)
+    average_score    = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    # 3-year averages
+    volatility_3yr_avg    = sa.Column(mysql.DOUBLE, nullable=True)
+    beta_3yr_avg          = sa.Column(mysql.DOUBLE, nullable=True)
+    max_drawdown_3yr_avg  = sa.Column(mysql.DOUBLE, nullable=True)
+    adr_3yr_avg           = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    # Year by year metrics - Year3 is most recent
+    volatility_year3  = sa.Column(mysql.DOUBLE, nullable=True)
+    volatility_year2  = sa.Column(mysql.DOUBLE, nullable=True)
+    volatility_year1  = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    beta_year3        = sa.Column(mysql.DOUBLE, nullable=True)
+    beta_year2        = sa.Column(mysql.DOUBLE, nullable=True)
+    beta_year1        = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    max_drawdown_year3 = sa.Column(mysql.DOUBLE, nullable=True)
+    max_drawdown_year2 = sa.Column(mysql.DOUBLE, nullable=True)
+    max_drawdown_year1 = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    adr_year3         = sa.Column(mysql.DOUBLE, nullable=True)
+    adr_year2         = sa.Column(mysql.DOUBLE, nullable=True)
+    adr_year1         = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    # Individual metric scores
+    volatility_score  = sa.Column(mysql.DOUBLE, nullable=True)
+    beta_score        = sa.Column(mysql.DOUBLE, nullable=True)
+    drawdown_score    = sa.Column(mysql.DOUBLE, nullable=True)
+    adr_score         = sa.Column(mysql.DOUBLE, nullable=True)
+    
+    # Timestamps
+    classified_at    = sa.Column(sa.DateTime, nullable=True)
+    created_at       = sa.Column(mysql.TIMESTAMP, server_default=sa.func.now())
+    updated_at       = sa.Column(mysql.TIMESTAMP, server_default=sa.func.now(), onupdate=sa.func.now())
+    
+    __table_args__ = (
+        sa.UniqueConstraint('symbol', 'classified_at', name='uix_equity_risk_profile_symbol_date'),
+    )
+    
+    def __repr__(self):
+        asset_type = "ETF" if self.is_etf else "Stock"
+        return f"EquityRiskProfile(symbol='{self.symbol}', type='{asset_type}', risk_type='{self.risk_type}', avg_score={self.average_score})"
