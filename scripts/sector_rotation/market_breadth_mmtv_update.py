@@ -18,7 +18,7 @@ project_root = script_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
 # Import from models and common functions
-from models.market_data import SymbolFields, MmtvDailyBar
+from models.market_data import SymbolFields, MmtvDailyBar, YfBar1d
 from scripts.common_function import get_database_engine, add_environment_args, get_session_maker
 
 # Configure logging
@@ -41,7 +41,10 @@ def get_us_stocks_with_sector(session):
     """Get US stocks with sector and industry information"""
     query = sa.select(
         SymbolFields.symbol, SymbolFields.sector, SymbolFields.industry
-    ).where(SymbolFields.country == "United States")
+    ).where(
+        SymbolFields.country == "United States",
+        SymbolFields.is_etf == 0,
+    )
     result = session.execute(query)
 
     us_stocks_sector = [
@@ -49,6 +52,8 @@ def get_us_stocks_with_sector(session):
         for row in result
     ]
 
+    logger.info(f"Found {len(us_stocks_sector)} US stocks with valid sector and industry data (excluding ETFs)")
+    
     sector_counts = defaultdict(int)
     industry_counts = defaultdict(int)
     for stock in us_stocks_sector:
@@ -66,11 +71,12 @@ def get_us_stocks_with_sector(session):
 def get_stock_data(engine, symbols, start_date, end_date):
     """Get stock price data for the specified symbols and date range"""
     placeholders = ",".join(f":symbol_{i}" for i in range(len(symbols)))
+    # Use DATE() to compare only the date portion of timestamp
     query = sa.text(f"""
         SELECT symbol, timestamp, open, high, low, close
         FROM yf_daily_bar
         WHERE symbol IN ({placeholders})
-        AND timestamp BETWEEN :start_date AND :end_date
+        AND DATE(timestamp) BETWEEN DATE(:start_date) AND DATE(:end_date)
         ORDER BY symbol, timestamp
     """)
 
@@ -98,7 +104,14 @@ def calculate_market_breadth(
     stock_data, sector_info, calculation_date, days_average=20, total_counts=None
 ):
     """Calculate market breadth metrics based on stock data"""
-    stock_data = stock_data[stock_data["timestamp"] <= calculation_date]
+    # Convert timestamp to date only and then filter
+    stock_data['date_only'] = stock_data['timestamp'].dt.date
+    calculation_date_only = calculation_date.date() if isinstance(calculation_date, datetime) else calculation_date
+    
+    # Use date_only for filtering instead of timestamp
+    stock_data = stock_data[stock_data['date_only'] <= calculation_date_only]
+    
+    # Set index to timestamp for historical operations
     stock_data = stock_data.set_index("timestamp")
 
     logger.info(f"Calculating breadth metrics for {calculation_date}")
@@ -124,8 +137,16 @@ def calculate_market_breadth(
     total_above_sma = defaultdict(int)
 
     for symbol, sector, industry in sector_info:
+        # Skip if sector or industry is None (this is a safety check, earlier filter should handle this)
+        if not sector or not industry:
+            continue
+
         df = stock_data[stock_data["symbol"] == symbol].copy()
         if df.empty:
+            continue
+
+        # Skip if we don't have enough data for SMA calculation
+        if len(df) < days_average:
             continue
 
         sector_symbol_counts[sector] += 1
@@ -134,6 +155,14 @@ def calculate_market_breadth(
 
         for col in ["open", "high", "low", "close"]:
             df[f"{col}_SMA"] = df[col].rolling(window=days_average).mean()
+            
+            # Add debug logging to understand SMA calculations
+            if len(df) > 0 and calculation_date in df.index:
+                price = df.loc[calculation_date, col]
+                sma = df.loc[calculation_date, f"{col}_SMA"]
+                if not pd.isna(sma):
+                    logger.debug(f"Symbol {symbol}: {col} price={price}, SMA={sma}, above_SMA={price > sma}")
+
             above_sma = (df[col] > df[f"{col}_SMA"]).astype(int)
 
             if calculation_date in df.index:
@@ -141,6 +170,15 @@ def calculate_market_breadth(
                 sector_breadth[sector].loc[calculation_date, col] += is_above
                 industry_breadth[industry].loc[calculation_date, col] += is_above
                 total_above_sma[col] += is_above
+            else:
+                # Try to find any entry with the same date
+                same_date_indices = df.index[df.index.date == calculation_date_only]
+                if len(same_date_indices) > 0:
+                    calculation_ts = same_date_indices[0]  # Use the first timestamp with matching date
+                    is_above = above_sma.loc[calculation_ts]
+                    sector_breadth[sector].loc[calculation_date, col] += is_above
+                    industry_breadth[industry].loc[calculation_date, col] += is_above
+                    total_above_sma[col] += is_above
 
     # Calculate Stock Percentages
     for sector, data in sector_breadth.items():
@@ -307,11 +345,14 @@ def is_trading_day(date):
     return date.weekday() < 5
 
 
-def get_trading_day_lookback(end_date, days):
-    """Get the date that is 'days' trading days before end_date"""
+def get_trading_day_lookback(end_date, days, additional_buffer=30):
+    """Get the date that is 'days' trading days before end_date with additional buffer days"""
     current_date = end_date
     trading_days = 0
-    while trading_days < days:
+    # Add buffer to ensure enough data for proper SMA calculation
+    total_days_needed = days + additional_buffer
+    
+    while trading_days < total_days_needed:
         current_date -= timedelta(days=1)
         if is_trading_day(current_date):
             trading_days += 1
@@ -372,11 +413,12 @@ def get_date_range(args):
         while not is_trading_day(start_date):
             start_date -= timedelta(days=1)
     elif args.start_date:
-        start_date = datetime.strptime(args.start_date, "%Y-%M-%d").date()
+        start_date = datetime.strptime(args.start_date, "%Y-%m-%d").date()
     else:
-        start_date = datetime(2023, 10, 1).date()
+        start_date = datetime(2025, 4, 1).date()
 
-    lookback_start = get_trading_day_lookback(start_date, args.days_average)
+    # Get lookback date with additional buffer days to ensure enough historical data
+    lookback_start = get_trading_day_lookback(start_date, args.days_average, additional_buffer=30)
     return lookback_start, start_date, end_date
 
 
@@ -421,7 +463,7 @@ def main():
                 current_date,
                 args.days_average,
                 total_counts,
-                args.env,  # Pass environment to each worker
+                args.env,
             )
             for current_date in pd.date_range(start_date, end_date)
             if current_date.weekday() < 5

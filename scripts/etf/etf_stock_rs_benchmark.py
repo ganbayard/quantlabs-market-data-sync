@@ -357,10 +357,50 @@ def calculate_relative_strength(assets, num_workers=4):
         
     return rs_data
 
-def save_rs_data_to_db(session, holdings_df, rs_data):
+def check_already_processed_today(session):
+    """
+    Check if data has already been processed today to avoid duplicate entries
+    Returns True if data for today already exists, False otherwise
+    """
+    try:
+        today = datetime.now().date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_end = datetime.combine(today, datetime.max.time())
+        
+        # Query to check if there are any records created today
+        query = """
+        SELECT COUNT(*) as count
+        FROM etf_stock_rs_benchmark
+        WHERE created_at BETWEEN :start_date AND :end_date
+        """
+        
+        result = pd.read_sql(text(query), session.bind, params={
+            "start_date": today_start, 
+            "end_date": today_end
+        })
+        
+        count = result['count'].iloc[0]
+        if count > 0:
+            logger.info(f"Found {count} records already processed today ({today})")
+            return True
+        else:
+            logger.info(f"No records found for today ({today}), proceeding with processing")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error checking if data already processed today: {str(e)}")
+        # If there's an error, assume not processed to be safe
+        return False
+
+def save_rs_data_to_db(session, holdings_df, rs_data, force_save=False):
     """Save the calculated RS data to the etf_stock_rs_benchmark table"""
     if not rs_data or holdings_df.empty:
         logger.warning("No data to save to the database")
+        return 0
+    
+    # Check if data has already been processed today
+    if not force_save and check_already_processed_today(session):
+        logger.warning("Data has already been processed today. Use --force flag to override.")
         return 0
     
     logger.info("Saving RS data to etf_stock_rs_benchmark table...")
@@ -439,6 +479,7 @@ def main():
     parser.add_argument('--output', type=str, help='Output CSV file path')
     parser.add_argument('--workers', type=int, default=4, help='Number of worker threads for calculations (default: 4)')
     parser.add_argument('--no-save', action='store_true', help='Do not save results to database')
+    parser.add_argument('--force', action='store_true', help='Force save to database even if already processed today')
     args = parser.parse_args()
     
     # Setup database connection based on environment
@@ -534,8 +575,11 @@ def main():
                 
                 # Save data to database unless --no-save flag is used
                 if not args.no_save:
-                    total_saved = save_rs_data_to_db(session, holdings_df, rs_data)
-                    logger.info(f"Saved {total_saved} records to etf_stock_rs_benchmark table")
+                    total_saved = save_rs_data_to_db(session, holdings_df, rs_data, force_save=args.force)
+                    if total_saved > 0:
+                        logger.info(f"Saved {total_saved} records to etf_stock_rs_benchmark table")
+                    else:
+                        logger.info("No new records were saved to the database")
         
         # Format output columns
         base_columns = ['stock_symbol', 'etf_symbol', 'ishare_etf_id', 'market_value', 'weight']

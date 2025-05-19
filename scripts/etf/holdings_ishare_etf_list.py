@@ -125,13 +125,14 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='ETF list data updater')
     parser = add_environment_args(parser)
+    parser.add_argument('--print-symbols', action='store_true', help='Print all ETF symbols to console')
     args = parser.parse_args()
     
     # Setup database connection based on environment
     engine = get_database_engine(args.env)
     Session = get_session_maker(args.env)
     session = Session()
-    
+   
     env_name = "PRODUCTION" if args.env == "prod" else "DEVELOPMENT"
     logger.info(f"Starting ETF list updater using {env_name} database")
 
@@ -142,6 +143,12 @@ def main():
         if etf_data.empty:
             logger.warning("No ETF data was retrieved.")
             return
+
+        # Print all ETF symbols separated by commas
+        etf_symbols = ','.join(etf_data['ticker'].tolist())
+        print("\nETF Symbols:")
+        print(etf_symbols)
+        print("\n")
 
         logger.info(f"Total number of unique ETFs: {len(etf_data)}")
         update_database(session, etf_data)
