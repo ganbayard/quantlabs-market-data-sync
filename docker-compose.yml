@@ -1,5 +1,4 @@
 version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0.35
@@ -9,19 +8,40 @@ services:
       MYSQL_DATABASE: ${LOCAL_DB_NAME}
       MYSQL_USER: ${LOCAL_DB_USER}
       MYSQL_PASSWORD: ${LOCAL_DB_PASSWORD}
+      MYSQL_INITDB_SKIP_TZINFO: 1
     ports:
       - "${LOCAL_DB_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+      - ./backups:/backups
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${LOCAL_DB_ROOT_PASSWORD:-rootpassword}"]
-      interval: 5s
-      timeout: 5s
+      interval: 10s
+      timeout: 10s
       retries: 5
+      start_period: 30s
     command: >
       --default-authentication-plugin=mysql_native_password
       --max_connections=200
-
+      --innodb_buffer_pool_size=1G
+      --innodb_log_file_size=256M
+      --innodb_log_buffer_size=64M
+      --innodb_flush_log_at_trx_commit=2
+      --max_allowed_packet=128M
+      --net_buffer_length=1M
+      --innodb_doublewrite=0
+      --innodb_flush_method=O_DIRECT
+      --disable-log-bin
+      --skip-log-bin
+      --bind-address=0.0.0.0
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
 volumes:
   mysql_data:
+
+  
