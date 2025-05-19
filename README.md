@@ -194,11 +194,10 @@ python scripts/general_info/yf_daily_bar_loader.py --period last_day --no-smart-
 
 
 
+### Development database table backup to aws server
 docker exec financial_market_db mysqldump --no-tablespaces -usync_user -p"quantlabs-sync" quantlabs_dev mmtv_daily_bars > sector_rotation.sql
 docker exec financial_market_db mysqldump --no-tablespaces -usync_user -p"quantlabs-sync" quantlabs_dev news_articles > news_articles
 docker exec financial_market_db mysqldump --no-tablespaces -usync_user -p"quantlabs-sync" quantlabs_dev equity_technical_indicators_history > equity_technical_indicators_history
-
-
 docker exec financial_market_db mysqldump --no-tablespaces -usync_user -p"quantlabs-sync" quantlabs_dev balance_sheets cash_flows income_statements > financial_details.sql
 
 
@@ -207,11 +206,7 @@ docker exec financial_market_db mysqldump --no-tablespaces -usync_user -p"quantl
 scp -i "aws-key/quantlab-web.pem" sector_rotation.sql ubuntu@ec2-3-72-81-201.eu-central-1.compute.amazonaws.com:/home/ubuntu/
 scp -i "aws-key/quantlab-web.pem" equity_technical_indicators_history.sql ubuntu@ec2-3-72-81-201.eu-central-1.compute.amazonaws.com:/home/ubuntu/
 scp -i "aws-key/quantlab-web.pem" news_articles.sql ubuntu@ec2-3-72-81-201.eu-central-1.compute.amazonaws.com:/home/ubuntu/
-
-
 scp -i "aws-key/quantlab-web.pem" financial_details.sql ubuntu@ec2-3-72-81-201.eu-central-1.compute.amazonaws.com:/home/ubuntu/
-
-
 scp -i "aws-key/quantlab-web.pem" sector_rotation.sql ubuntu@ec2-3-72-81-201.eu-central-1.compute.amazonaws.com:/home/ubuntu/
 
 
