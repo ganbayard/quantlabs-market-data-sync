@@ -552,7 +552,7 @@ def main():
     
     # Smart update setting
     smart_update = not args.no_smart_update
-    
+   
     # Determine date range
     if args.start_date:
         start_date, end_date = get_date_range(start_date=args.start_date, smart_update=False)
