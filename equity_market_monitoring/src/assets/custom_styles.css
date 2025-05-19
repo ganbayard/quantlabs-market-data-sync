@@ -1,0 +1,120 @@
+/* Dashboard styling */
+.stApp {
+    font-family: 'Inter', sans-serif;
+}
+
+/* Card styling */
+.chart-card {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+/* Dashboard metrics */
+.metric-row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+/* Filter container */
+.filter-container {
+    background-color: rgba(255, 255, 255, 0.03);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(128, 128, 128, 0.1);
+}
+
+/* Tooltip styling */
+.tooltip {
+    position: relative;
+    display: inline-block;
+    cursor: help;
+}
+
+.tooltip .tooltiptext {
+    visibility: hidden;
+    width: 200px;
+    background-color: #333;
+    color: #fff;
+    text-align: center;
+    border-radius: 6px;
+    padding: 10px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    margin-left: -100px;
+    opacity: 0;
+    transition: opacity 0.3s;
+    font-size: 0.8rem;
+}
+
+.tooltip:hover .tooltiptext {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Risk type styling */
+.risk-conservative {
+    color: #1E88E5;
+    font-weight: bold;
+}
+
+.risk-moderate {
+    color: #FFC107;
+    font-weight: bold;
+}
+
+.risk-aggressive {
+    color: #E53935;
+    font-weight: bold;
+}
+
+/* Notification styling */
+.notification {
+    padding: 1rem;
+    border-radius: 5px;
+    margin-bottom: 1rem;
+}
+
+.notification-info {
+    background-color: rgba(33, 150, 243, 0.2);
+    border-left: 4px solid #2196F3;
+}
+
+.notification-warning {
+    background-color: rgba(255, 152, 0, 0.2);
+    border-left: 4px solid #FF9800;
+}
+
+.notification-error {
+    background-color: rgba(244, 67, 54, 0.2);
+    border-left: 4px solid #F44336;
+}
+
+/* Table styling */
+.dataframe-container {
+    border-radius: 5px;
+    overflow: hidden;
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    margin-bottom: 1rem;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .chart-card {
+        background-color: rgba(0, 0, 0, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .filter-container {
+        background-color: rgba(0, 0, 0, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+}
