@@ -3,7 +3,7 @@ venv/
 aws-key/
 execution.csv
 execution_log/scripts_run_log.txt
-backup_before_migration.sql
+backups/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
