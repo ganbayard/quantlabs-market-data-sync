@@ -13,3 +13,10 @@ norgatedata
 cachetools
 tqdm
 pymysql
+scikit-learn
+
+
+plotly
+streamlit
+pytz
+python-dateutil
